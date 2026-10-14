@@ -336,3 +336,7 @@ body.recording .scale-hide, body.planning .leaflet-control-scale { visibility: h
 @media (min-width: 760px) {
   .sheet.sheet-left { left: max(12px, env(safe-area-inset-left, 0px)); right: auto; top: calc(env(safe-area-inset-top, 0px) + 62px); bottom: auto; width: 400px; max-height: calc(100vh - 90px); }
 }
+/* Panel content stacks top to bottom and scrolls; sections never squash into each other. */
+.sheet-body { display: flex; flex-direction: column; gap: 18px; min-height: 0; flex: 1 1 auto; }
+.sheet-body > * { flex: 0 0 auto; min-height: auto; }
+.sheet-head, .sheet-grip { flex: 0 0 auto; }
