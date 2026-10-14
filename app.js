@@ -408,12 +408,65 @@ function poiCategory(t) {
   if (t.amenity === 'police') return 'police';
   return null;
 }
+// Places for an area (English labels, resorts, lifts, runs, onsens, parking...) from OpenStreetMap.
+// Loaded automatically the first time you look at an area with signal and kept for offline use.
+async function fetchPlaces(area) {
+  const s = area.bounds[0][0], w = area.bounds[0][1], n = area.bounds[1][0], e = area.bounds[1][1];
+  const bb = s + ',' + w + ',' + n + ',' + e;
+  const q = '[out:json][timeout:90];(' +
+    'nwr["natural"="hot_spring"](' + bb + ');nwr["amenity"="public_bath"](' + bb + ');nwr["bath:type"="onsen"](' + bb + ');' +
+    'nwr["amenity"="parking"](' + bb + ');nwr["tourism"~"^(alpine_hut|wilderness_hut)$"](' + bb + ');' +
+    'node["aerialway"="station"](' + bb + ');nwr["shop"="convenience"](' + bb + ');' +
+    'nwr["amenity"~"^(hospital|clinic|police)$"](' + bb + ');' +
+    'nwr["landuse"="winter_sports"]["name"](' + bb + ');node["natural"~"^(peak|volcano|saddle)$"]["name"](' + bb + ');' +
+    'way["natural"~"^(ridge|valley)$"]["name"](' + bb + ');node["place"~"^(town|village|hamlet|locality)$"]["name"](' + bb + ');' +
+    'nwr["natural"="water"]["name"](' + bb + '););out center tags;' +
+    '(way["aerialway"~"^(cable_car|gondola|mixed_lift|chair_lift|drag_lift|t-bar|j-bar|platter|rope_tow)$"](' + bb + ');' +
+    'way["piste:type"="downhill"](' + bb + '););out geom tags;';
+  const r = await fetch(OVERPASS, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+  if (!r.ok) throw new Error('places ' + r.status);
+  const j = await r.json();
+  const points = [], lines = [], labels = [];
+  (j.elements || []).forEach(el => {
+    const t = el.tags || {};
+    if (el.geometry && (t.aerialway || t['piste:type'])) {
+      const pts = el.geometry.map(g => [+g.lat.toFixed(5), +g.lon.toFixed(5)]);
+      if (pts.length > 1) lines.push({ c: t.aerialway ? 'lift' : 'run', kind: t.aerialway || '', name: t['name:en'] || t.name || t['piste:name'] || '', ja: t.name || '', diff: t['piste:difficulty'] || '', pts });
+      return;
+    }
+    const lat = el.lat != null ? el.lat : el.center && el.center.lat, lon = el.lon != null ? el.lon : el.center && el.center.lon;
+    if (lat == null) return;
+    const lc = labelCategory(t);
+    if (lc) { labels.push({ c: lc, lat, lon, ja: t.name || '', en: t['name:en'] || t['name:ja-Latn'] || t['name:ja_rm'] || '', ele: parseInt(t.ele, 10) || null }); return; }
+    const c = poiCategory(t); if (!c) return;
+    points.push({ c, lat, lon, name: t.name || '', en: t['name:en'] || '', fee: t.fee || '', hours: t.opening_hours || '', cap: t.capacity || '' });
+  });
+  return { v: 2, fetched: new Date().toISOString(), points, lines, labels };
+}
+async function savePlaces(area, data) {
+  const json = JSON.stringify(data);
+  const c = await caches.open('places');
+  await c.put('/pois/' + area.id, new Response(json, { headers: { 'Content-Type': 'application/json' } }));
+  return json;
+}
+const placesInFlight = {};
 async function loadPois(area) {
   const empty = { points: [], lines: [], labels: [] };
   if (!('caches' in window)) return empty;
-  const r = await caches.match('/pois/' + area.id).catch(() => null);
-  if (!r) return empty;
-  try { const j = await r.json(); return Array.isArray(j) ? { points: j, lines: [] } : j; } catch (e) { return empty; }
+  let data = null;
+  try { const r = await caches.match('/pois/' + area.id); if (r) { const j = await r.json(); data = Array.isArray(j) ? { points: j, lines: [], labels: [] } : j; } } catch (e) { }
+  const stale = !data || !data.labels; // first visit, or saved before names/resorts existed
+  if (stale && navigator.onLine) {
+    try {
+      placesInFlight[area.id] = placesInFlight[area.id] || (async () => {
+        toast('Loading names, resorts and lifts for ' + area.name + '…', 4000);
+        const fresh = await fetchPlaces(area); await savePlaces(area, fresh); return fresh;
+      })();
+      data = await placesInFlight[area.id];
+    } catch (e) { if (!data) toast('Couldn\'t load place names right now. They\'ll load next time you have signal.'); }
+    finally { delete placesInFlight[area.id]; }
+  }
+  return data || empty;
 }
 function labelCategory(t) {
   if (t.landuse === 'winter_sports') return 'resort';
@@ -443,7 +496,10 @@ const RUN_COL = { novice: '#1f9d55', easy: '#1f9d55', intermediate: '#d42a2a', a
 async function renderPois() {
   poiLayer.clearLayers();
   if (!state.area || map.getZoom() < 11) return;
-  const data = state._pois && state._pois.area === state.area.id ? state._pois.data : (state._pois = { area: state.area.id, data: await loadPois(state.area) }).data;
+  const areaId = state.area.id;
+  let data;
+  if (state._pois && state._pois.area === areaId) data = state._pois.data;
+  else { data = await loadPois(state.area); state._pois = { area: areaId, data }; if (state.area.id !== areaId) return; poiLayer.clearLayers(); }
   const pois = data.points || [];
   const z = map.getZoom(); const vb = map.getBounds().pad(0.2);
   const labels = data.labels || [];
@@ -508,44 +564,8 @@ async function downloadPack(area, maxZ, onProgress) {
   await Promise.all(Array.from({ length: 6 }, worker));
   if (failed > jobs.length * 0.2) throw new Error('Lost connection part way. Tap Download again to finish; tiles already saved are kept.');
 
-  // Onsens, parking, huts, lifts, konbini, medical, koban
-  const s = area.bounds[0][0], w = area.bounds[0][1], n = area.bounds[1][0], e = area.bounds[1][1];
-  const bb = s + ',' + w + ',' + n + ',' + e;
-  const q = '[out:json][timeout:60];(' +
-    'nwr["natural"="hot_spring"](' + bb + ');nwr["amenity"="public_bath"](' + bb + ');nwr["bath:type"="onsen"](' + bb + ');' +
-    'nwr["amenity"="parking"](' + bb + ');nwr["tourism"~"^(alpine_hut|wilderness_hut)$"](' + bb + ');' +
-    'node["aerialway"="station"](' + bb + ');nwr["shop"="convenience"](' + bb + ');' +
-    'nwr["amenity"~"^(hospital|clinic|police)$"](' + bb + ');' +
-    // Names for the English label layer: resorts, peaks, passes, ridges, valleys, villages, lakes
-    'nwr["landuse"="winter_sports"]["name"](' + bb + ');node["natural"~"^(peak|volcano|saddle)$"]["name"](' + bb + ');' +
-    'way["natural"~"^(ridge|valley)$"]["name"](' + bb + ');node["place"~"^(town|village|hamlet|locality)$"]["name"](' + bb + ');' +
-    'nwr["natural"="water"]["name"](' + bb + '););out center tags;' +
-    '(way["aerialway"~"^(cable_car|gondola|mixed_lift|chair_lift|drag_lift|t-bar|j-bar|platter|rope_tow)$"](' + bb + ');' +
-    'way["piste:type"="downhill"](' + bb + '););out geom tags;';
-  try {
-    const r = await fetch(OVERPASS, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-    if (r.ok) {
-      const j = await r.json();
-      const list = [], lines = [], labels = [];
-      (j.elements || []).forEach(el => {
-        const t = el.tags || {};
-        if (el.geometry && (t.aerialway || t['piste:type'])) {
-          const pts = el.geometry.map(g => [+g.lat.toFixed(5), +g.lon.toFixed(5)]);
-          if (pts.length > 1) lines.push({ c: t.aerialway ? 'lift' : 'run', kind: t.aerialway || '', name: t['name:en'] || t.name || t['piste:name'] || '', ja: t.name || '', diff: t['piste:difficulty'] || '', pts });
-          return;
-        }
-        const lat = el.lat != null ? el.lat : el.center && el.center.lat, lon = el.lon != null ? el.lon : el.center && el.center.lon;
-        if (lat == null) return;
-        const lc = labelCategory(t);
-        if (lc) { labels.push({ c: lc, lat, lon, ja: t.name || '', en: t['name:en'] || t['name:ja-Latn'] || t['name:ja_rm'] || '', ele: parseInt(t.ele, 10) || null }); if (lc !== 'resort') return; }
-        const c = poiCategory(t); if (!c) return;
-        list.push({ c, lat, lon, name: t.name || '', en: t['name:en'] || '', fee: t.fee || '', hours: t.opening_hours || '', cap: t.capacity || '' });
-      });
-      const json = JSON.stringify({ points: list, lines, labels });
-      await cache.put('/pois/' + area.id, new Response(json, { headers: { 'Content-Type': 'application/json' } }));
-      bytes += json.length;
-    }
-  } catch (e) { /* POIs are a nice-to-have */ }
+  // Names, lifts, onsens, parking... (also loads on its own when you browse an area with signal)
+  try { const json = await savePlaces(area, await fetchPlaces(area)); bytes += json.length; state._pois = null; } catch (e) { /* places are a nice-to-have */ }
   done++; onProgress(done / total, bytes);
 
   // Locate known slide paths that only have a place name
