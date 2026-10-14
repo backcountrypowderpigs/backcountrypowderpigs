@@ -309,3 +309,27 @@ body.recording .scale-hide, body.planning .leaflet-control-scale { visibility: h
 .profile { width: 100%; height: 90px; display: block; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; }
 .profile-fill { fill: rgba(0, 180, 255, .18); }
 .profile-line { fill: none; stroke: #00b4ff; stroke-width: 2; vector-effect: non-scaling-stroke; }
+
+/* ---------- help + markers ---------- */
+.help-btn { width: 44px; height: 44px; flex: none; border-radius: 50%; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); font-weight: 800; font-size: 20px; cursor: pointer; color: var(--accent); }
+.help-row { display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: center; }
+.help-ico { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); font-size: 11px; }
+.help-ico.red { background: var(--skull); color: #fff; border-color: var(--skull); }
+.help-ico .ab { font-size: 9px; white-space: nowrap; }
+.help-ico .bars { display: flex; gap: 2px; }
+.help-ico .bars i { width: 6px; height: 14px; border-radius: 2px; display: block; }
+.help-ico .bars i.r3 { background: var(--d3); } .help-ico .bars i.r2 { background: var(--d2); }
+.help-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.hz-pin { width: 30px; height: 30px; border-radius: 8px; transform: rotate(45deg); display: grid; place-items: center; border: 2px solid #fff; box-shadow: 0 2px 4px rgba(0,0,0,.45); position: relative; flex: none; }
+.hz-pin > svg { transform: rotate(-45deg); }
+.hz-pin.small { width: 26px; height: 26px; border-radius: 6px; }
+.hz-pin.tiny { width: 18px; height: 18px; border-radius: 4px; display: inline-grid; vertical-align: -4px; border-width: 1px; }
+.hz-pin .pin-ring { inset: -5px; border-radius: 10px; }
+.hz-pin.old { opacity: .55; }
+.hz-pin.disputed { opacity: .5; }
+.hz-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.hz-grid button { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); cursor: pointer; text-align: left; font-size: 14px; }
+.hz-grid button.on { border: 2px solid var(--accent); background: var(--surface-2); font-weight: 700; }
+@media (max-width: 380px) { .chip-text { max-width: 26vw; } }
+.seg { min-height: 46px; flex-shrink: 0; }
+.sheet-body > * { min-height: min-content; }

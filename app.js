@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.9';
+const APP_VERSION = '2026-10-15.10';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -48,7 +48,7 @@ const state = {
   customAreas: store.get('customAreas', []), boundsOverrides: store.get('boundsOverrides', {}),
   slides: [], pins: store.get('pins', []),
   shade: store.get('shade', 'danger'), base: store.get('base', 'sat') === 'topo' ? 'topo' : 'sat',
-  show: Object.assign({ recent: true, path: true, onsen: true, parking: true, hut: true, shop: true, lifts: true, labels: true }, store.get('show', {})),
+  show: Object.assign({ recent: true, path: true, hazard: true, onsen: true, parking: true, hut: true, shop: true, lifts: true, labels: true }, store.get('show', {})),
   recentWindow: ['week', 'month', 'season'].includes(store.get('recentWindow', '')) ? store.get('recentWindow', '') : 'week',
   aspectSel: store.get('aspectSel', ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']), aspectMatch: store.get('aspectMatch', true),
   aspectOn: store.get('aspectOn', store.get('shade', '') === 'aspect'),
@@ -348,6 +348,40 @@ function updateNativeZoom() {
 /* ------------------------------------------------------------------ markers */
 const SKULL = '<svg viewBox="0 0 32 32" width="34" height="34" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#c8102e" stroke="#fff" stroke-width="2"/><g stroke="#fff" stroke-width="2.4" stroke-linecap="round"><line x1="8.5" y1="20.5" x2="23.5" y2="26.5"/><line x1="23.5" y1="20.5" x2="8.5" y2="26.5"/></g><path d="M16 5.6c-4.9 0-8 3.2-8 7.3 0 2.5 1.1 4.2 2.9 5.2v2.6h10.2v-2.6c1.8-1 2.9-2.7 2.9-5.2 0-4.1-3.1-7.3-8-7.3z" fill="#fff"/><circle cx="12.7" cy="13.3" r="2" fill="#c8102e"/><circle cx="19.3" cy="13.3" r="2" fill="#c8102e"/><path d="M16 15.6l-1.2 2.1h2.4z" fill="#c8102e"/></svg>';
 const PATH = '<svg viewBox="0 0 32 32" width="34" height="34" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#111" stroke="#fff" stroke-width="2"/><path d="M6.5 23.5L15 8l5 9 2.5-3.5 3.5 9.5" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="M12.5 14c1.5 2.5 1 5-1 7.5M17 18c.8 1.6.5 3.4-.6 5" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>';
+/* Hazard and handy markers riders can drop. Amber = hazard, red = keep out, blue = water, green = good to know. */
+const HZ_PATH = {
+  rocks: '<path d="M3 18l4-6 3 2 4-7 4 6 3 5z" fill="#fff"/>',
+  cliff: '<path d="M4 6h8v12h8" fill="none" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/><path d="M16 9v5m-2-2l2 2 2-2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>',
+  cornice: '<path d="M3 17h7c4 0 7-3 8-7 .5-2 2-3 3-3" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><path d="M18 7c1.5 2 1 4 0 5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>',
+  debris: '<rect x="4" y="12" width="5" height="5" rx="1" fill="#fff"/><rect x="10" y="9" width="6" height="8" rx="1" fill="#fff"/><rect x="17" y="13" width="4" height="4" rx="1" fill="#fff"/><path d="M4 8l4-3M10 5l3-2" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>',
+  water: '<path d="M3 10c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 15c2-2 4-2 6 0s4 2 6 0 4-2 6 0" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>',
+  treewell: '<path d="M12 3l5 8h-3l4 6H6l4-6H7z" fill="#fff"/><ellipse cx="12" cy="20" rx="6" ry="1.6" fill="none" stroke="#fff" stroke-width="1.6"/>',
+  ice: '<path d="M4 18l5-6-3-2 7-6-2 6 4 1-7 7z" fill="#fff"/>',
+  noentry: '<circle cx="12" cy="12" r="7.5" fill="none" stroke="#fff" stroke-width="2.4"/><path d="M7 12h10" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>',
+  regroup: '<path d="M7 21V4" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/><path d="M7 4h10l-2.5 3.5L17 11H7z" fill="#fff"/>',
+  goodsnow: '<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9" stroke="#fff" stroke-width="2" stroke-linecap="round"/><path d="M10 4.5l2 1.5 2-1.5M10 19.5l2-1.5 2 1.5" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>',
+  other: '<path d="M12 6v8" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/><circle cx="12" cy="18" r="1.7" fill="#fff"/>',
+};
+const HAZARDS = [
+  { id: 'rocks', label: 'Rocks / shallow', col: '#d97706', temp: false },
+  { id: 'cliff', label: 'Cliff / drop-off', col: '#d97706', temp: false },
+  { id: 'cornice', label: 'Cornice', col: '#d97706', temp: true },
+  { id: 'debris', label: 'Avalanche debris', col: '#b91c1c', temp: true },
+  { id: 'water', label: 'Open creek / water', col: '#0369a1', temp: true },
+  { id: 'treewell', label: 'Tree wells / holes', col: '#d97706', temp: false },
+  { id: 'ice', label: 'Ice / hard crust', col: '#d97706', temp: true },
+  { id: 'noentry', label: 'No entry / closed', col: '#b91c1c', temp: false },
+  { id: 'regroup', label: 'Regroup / safe spot', col: '#15803d', temp: false },
+  { id: 'goodsnow', label: 'Good snow', col: '#15803d', temp: true },
+  { id: 'other', label: 'Other hazard', col: '#d97706', temp: true },
+];
+const hazardOf = id => HAZARDS.find(h => h.id === id) || HAZARDS[HAZARDS.length - 1];
+function hazardSvg(id, size = 22) { return '<svg viewBox="0 0 24 24" width="' + size + '" height="' + size + '" aria-hidden="true">' + (HZ_PATH[id] || HZ_PATH.other) + '</svg>'; }
+function hazardIcon(p, cls) {
+  const h = hazardOf(p.htype);
+  return L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15],
+    html: '<div class="hz-pin ' + cls + '" style="background:' + h.col + '">' + hazardSvg(h.id, 20) + (/unverified/.test(cls) ? '<span class="pin-ring"></span>' : '') + '</div>' });
+}
 function pinIcon(kind, cls) {
   return L.divIcon({ className: '', iconSize: [34, 34], iconAnchor: [17, 17],
     html: '<div class="pin ' + cls + '" style="position:relative">' + (kind === 'recent' ? SKULL : PATH) + (/unverified/.test(cls) ? '<span class="pin-ring"></span>' : '') + '</div>' });
@@ -389,6 +423,7 @@ function renderPins() {
   allPins().forEach(p => {
     if (p.kind === 'recent' && !state.show.recent) return;
     if (p.kind === 'path' && !state.show.path) return;
+    if (p.kind === 'hazard' && !state.show.hazard) return;
     const t = trustOf(p);
     let cls = t.level;
     if (p.kind === 'recent' && p.source !== 'demo') {
@@ -396,7 +431,8 @@ function renderPins() {
       if (age > recentLimitDays()) return;
       if (age > 7) cls += ' old';
     }
-    const m = L.marker([p.lat, p.lon], { icon: pinIcon(p.kind, cls), keyboard: true, title: p.kind === 'recent' ? 'Recent avalanche' : 'Known slide path', zIndexOffset: p.kind === 'recent' ? 600 : 500 });
+    if (p.kind === 'hazard' && hazardOf(p.htype).temp && daysAgo(p.date) > 14) cls += ' old';
+    const m = L.marker([p.lat, p.lon], { icon: p.kind === 'hazard' ? hazardIcon(p, cls) : pinIcon(p.kind, cls), keyboard: true, title: p.kind === 'recent' ? 'Recent avalanche' : p.kind === 'hazard' ? hazardOf(p.htype).label : 'Known slide path', zIndexOffset: p.kind === 'recent' ? 600 : p.kind === 'hazard' ? 550 : 500 });
     m.on('click', () => openPin(p.id));
     pinLayer.addLayer(m);
   });
@@ -812,7 +848,7 @@ function showLayers() {
   if (eff === 'danger') h += '<div class="legend"><span><span class="sw" style="background:rgba(214,18,36,.6)"></span><b>Red: stay off.</b> Steep slopes the bulletin rates dangerous for their height and aspect.</span><span><span class="sw" style="background:rgba(247,148,30,.45)"></span><b>Amber: only with good reason</b>, one at a time, and a way out.</span><span class="muted">Ground below the shading (gullies, runouts) can still be hit by slides from above.</span></div>';
   else if (eff === 'slope') h += '<div class="legend"><span><span class="sw" style="background:rgb(250,225,0)"></span>27–29°</span><span><span class="sw" style="background:rgb(247,148,30)"></span>30–34°</span><span><span class="sw" style="background:rgb(226,32,40)"></span>35–39°</span><span><span class="sw" style="background:rgb(140,40,170)"></span>40–44°</span><span><span class="sw" style="background:rgb(40,30,50)"></span>45° and steeper</span><span class="muted">Most slab avalanches start on 30–45° slopes.</span></div>';
   h += aspectHtml;
-  h += '<div class="field"><span class="lbl">Show</span>' + tog('recent', 'Recent avalanches (red skulls)') + tog('path', 'Known slide paths (black pins)') + tog('onsen', '♨ Onsens') + tog('parking', 'Parking (zoom in to see)') + tog('labels', 'English place names and ski resorts') + tog('lifts', 'Lifts and ski runs') + tog('hut', 'Huts and lift stations') + tog('shop', 'Konbini, medical, koban') + '</div>';
+  h += '<div class="field"><span class="lbl">Show</span>' + tog('recent', 'Recent avalanches (red skulls)') + tog('path', 'Known slide paths (black pins)') + tog('hazard', 'Hazard and handy markers') + tog('onsen', '♨ Onsens') + tog('parking', 'Parking (zoom in to see)') + tog('labels', 'English place names and ski resorts') + tog('lifts', 'Lifts and ski runs') + tog('hut', 'Huts and lift stations') + tog('shop', 'Konbini, medical, koban') + '</div>';
   h += '<details class="glossary"><summary>Japanese map words</summary><p class="small muted">The topo map\'s own text is Japanese and can\'t be translated in place. These endings tell you what a name is.</p><dl class="kv small">' +
     [['岳 / 山 / 峰', 'dake / yama / mine: peak, mountain'], ['尾根', 'one: ridge'], ['沢', 'sawa: gully, creek'], ['谷', 'tani / dani: valley'], ['峠 / 乗越', 'tōge / nokkoshi: pass, col'], ['頭', 'atama / kashira: knoll, top'], ['平 / 原', 'taira / hara: flat, plateau'], ['池 / 湖', 'ike / ko: pond, lake'], ['滝', 'taki: waterfall'], ['川', 'kawa / gawa: river'], ['温泉', 'onsen: hot spring'], ['小屋', 'koya: hut'], ['登山口', 'tozanguchi: trailhead'], ['駐車場', 'chūshajō: parking'], ['スキー場', 'sukījō: ski area'], ['ゲート', 'gēto: backcountry gate'], ['雪崩', 'nadare: avalanche'], ['立入禁止', 'tachiiri kinshi: no entry']]
       .map(([j, e]) => '<dt lang="ja">' + j + '</dt><dd>' + e + '</dd>').join('') + '</dl></details>';
@@ -1021,7 +1057,7 @@ function startPlacing(opts = {}) {
   closeSheet(); placing = Object.assign({ kind: 'recent' }, opts);
   $('#placeBar').hidden = false; $('.fabs').hidden = true; $('#readout').hidden = true;
   $('#placeKind').hidden = !!opts.placeSlide || !!opts.movePin;
-  $('#placeTitle').textContent = opts.placeSlide ? 'Put the cross on ' + (state.slides.find(s => s.id === opts.placeSlide) || {}).name : opts.movePin ? 'Move the cross to the right spot' : 'Move the map to put the cross where the slide started';
+  $('#placeTitle').textContent = opts.placeSlide ? 'Put the cross on ' + (state.slides.find(s => s.id === opts.placeSlide) || {}).name : opts.movePin ? 'Move the cross to the right spot' : 'Move the map to put the cross on the spot';
   $('#placeKind').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === placing.kind));
   if (map.getZoom() < 14) map.setZoom(14);
 }
@@ -1044,12 +1080,42 @@ function chips(name, options, value, extraCls = '') {
 function savePins() { store.set('pins', state.pins); }
 function reporterName() { return store.get('reporterName', ''); }
 
+function kindSeg(kind) {
+  return '<div class="seg" id="kindSeg">' + [['recent', 'Recent slide'], ['path', 'Slide path'], ['hazard', 'Hazard / marker']].map(([v, l]) => '<button type="button" data-v="' + v + '" class="' + (kind === v ? 'on' : '') + '">' + l + '</button>').join('') + '</div>';
+}
+function hazardForm(p, existing) {
+  let h = kindSeg('hazard');
+  h += '<div class="field"><span class="lbl">What is it?</span><div class="hz-grid" id="hzGrid">' + HAZARDS.map(z => '<button type="button" data-v="' + z.id + '" class="' + (p.htype === z.id ? 'on' : '') + '"><span class="hz-pin small" style="background:' + z.col + '">' + hazardSvg(z.id, 18) + '</span>' + esc(z.label) + '</button>').join('') + '</div></div>';
+  h += '<div class="field"><label for="f-date">Seen on</label><input type="date" id="f-date" value="' + esc(p.date || today()) + '" max="' + today() + '"></div>';
+  h += '<div class="field"><label for="f-notes">Notes <span class="muted">(optional)</span></label><textarea id="f-notes" maxlength="500" placeholder="e.g. rocks just under the snow on skier\'s left, easy to miss in flat light">' + esc(p.notes || '') + '</textarea></div>';
+  h += '<div class="field"><label for="f-rep">Your name</label><input type="text" id="f-rep" maxlength="40" value="' + esc(p.reporter || reporterName()) + '"></div>';
+  h += '<div id="formErr" class="err" hidden></div><div class="btn-row"><button class="btn" id="fCancel">Cancel</button><button class="btn primary" id="fSave">' + (existing ? 'Save changes' : 'Drop marker') + '</button></div>';
+  openSheet(existing ? 'Edit marker' : 'Drop a marker', h, { view: 'form', tall: true });
+  $('#hzGrid').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; $('#hzGrid').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
+  $('#kindSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b && b.dataset.v !== 'hazard') pinForm(b.dataset.v, p.lat, p.lon, existing ? Object.assign({}, existing, { kind: b.dataset.v }) : null); });
+  $('#fCancel').onclick = closeSheet;
+  $('#fSave').onclick = () => {
+    const on = $('#hzGrid .on');
+    if (!on) { const er = $('#formErr'); er.textContent = 'Pick what the marker is.'; er.hidden = false; return; }
+    const out = Object.assign(p, { kind: 'hazard', htype: on.dataset.v, date: $('#f-date').value || today(), notes: $('#f-notes').value.trim(), reporter: $('#f-rep').value.trim(), updatedAt: new Date().toISOString() });
+    if (out.date > today()) { const er = $('#formErr'); er.textContent = 'The date can\'t be in the future.'; er.hidden = false; return; }
+    if (out.reporter) store.set('reporterName', out.reporter);
+    out.createdAt = out.createdAt || out.updatedAt;
+    const i = state.pins.findIndex(x => x.id === out.id); if (i >= 0) state.pins[i] = out; else state.pins.push(out);
+    savePins(); renderPins(); closeSheet(); toast(hazardOf(out.htype).label + ' marker dropped');
+  };
+}
 async function pinForm(kind, lat, lon, existing) {
+  if (kind === 'hazard' || (existing && existing.kind === 'hazard' && !kind)) {
+    const ph = existing ? Object.assign({}, existing, { kind: 'hazard' }) : { id: 'p-' + uid(), kind: 'hazard', lat, lon, date: today(), deviceId, reporter: reporterName(), source: 'user', verifications: {} };
+    const ar = areaFor(ph.lat, ph.lon) || state.area; ph.area = ar.id;
+    return hazardForm(ph, existing);
+  }
   const p = existing ? Object.assign({}, existing) : { id: 'p-' + uid(), kind, lat, lon, date: today(), deviceId, reporter: reporterName(), source: 'user', verifications: {} };
   kind = p.kind;
   const area = areaFor(p.lat, p.lon) || state.area; p.area = area.id;
   const isRecent = kind === 'recent';
-  let h = '<div class="seg" id="kindSeg"><button type="button" data-v="recent" class="' + (isRecent ? 'on' : '') + '">Recent slide</button><button type="button" data-v="path" class="' + (!isRecent ? 'on' : '') + '">Known slide path</button></div>';
+  let h = kindSeg(kind);
   h += '<div id="terrainLine" class="small muted">Reading the terrain at the pin…</div>';
   if (!isRecent) h += '<div class="field"><label for="f-name">Name of the slope or gully <span class="muted">(optional)</span></label><input type="text" id="f-name" value="' + esc(p.name || '') + '" maxlength="80"></div>';
   if (isRecent) h += '<div class="field"><label for="f-date">When did it run?</label><input type="date" id="f-date" value="' + esc(p.date || today()) + '" max="' + today() + '"></div>';
@@ -1120,8 +1186,9 @@ async function pinForm(kind, lat, lon, existing) {
 function openPin(id) {
   const p = findPin(id); if (!p) return;
   const t = trustOf(p); const own = p.source === 'user' && p.deviceId === deviceId;
-  const isRecent = p.kind === 'recent';
-  let h = '<div class="row"><span class="badge ' + t.level + '">' + esc(t.label) + '</span>' + (isRecent && p.date ? '<span class="muted small">' + fmtDate(p.date) + ' · ' + Math.floor(daysAgo(p.date)) + ' days ago</span>' : '') + '</div>';
+  const isRecent = p.kind === 'recent', isHz = p.kind === 'hazard';
+  let h = (isHz ? '<div class="row"><span class="hz-pin" style="background:' + hazardOf(p.htype).col + '">' + hazardSvg(p.htype, 20) + '</span><b>' + esc(hazardOf(p.htype).label) + '</b>' + (p.date ? '<span class="muted small">seen ' + fmtDate(p.date) + ' · ' + Math.floor(daysAgo(p.date)) + ' days ago</span>' : '') + '</div>' : '') +
+    '<div class="row"><span class="badge ' + t.level + '">' + esc(t.label) + '</span>' + (isRecent && p.date ? '<span class="muted small">' + fmtDate(p.date) + ' · ' + Math.floor(daysAgo(p.date)) + ' days ago</span>' : '') + '</div>';
   if (p.source === 'jan' && p.incidents) {
     h += '<div class="stack"><b>' + esc(p.name) + '</b> <span class="muted">' + esc(p.nameJa || '') + '</span><span class="small muted">' + esc(p.locNote || '') + '</span>' +
       p.incidents.map(i => '<div class="card"><b>' + fmtDate(i.date) + '</b><span class="small">' + esc(i.summary) + '</span><a class="small" href="' + esc(i.url) + '" target="_blank" rel="noopener">JAN incident record ↗</a></div>').join('') +
@@ -1149,7 +1216,7 @@ function openPin(id) {
     }
   }
   h += '<a class="small" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=' + p.lat.toFixed(5) + ',' + p.lon.toFixed(5) + '">' + p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) + ' ↗</a>';
-  openSheet(isRecent ? 'Recent avalanche' : 'Known slide path', h, { view: 'pin' });
+  openSheet(isRecent ? 'Recent avalanche' : isHz ? 'Marker' : 'Known slide path', h, { view: 'pin' });
   map.panTo([p.lat, p.lon]);
 
   const up = $('#unplace'); if (up) up.onclick = () => { delete state.placed[p.id]; store.set('placed', state.placed); renderPins(); closeSheet(); };
@@ -1197,14 +1264,14 @@ function cleanPin(x) {
   if (!x || typeof x !== 'object') return null;
   const lat = Number(x.lat), lon = Number(x.lon);
   if (!isFinite(lat) || !isFinite(lon) || lat < 20 || lat > 46 || lon < 122 || lon > 154) return null; // Japan only
-  if (x.kind !== 'recent' && x.kind !== 'path') return null;
+  if (x.kind !== 'recent' && x.kind !== 'path' && x.kind !== 'hazard') return null;
   const s = v => (v == null ? '' : String(v)).slice(0, 1000);
   const n = v => { const k = Number(v); return isFinite(k) ? k : null; };
   const out = { id: s(x.id).slice(0, 40) || 'p-' + uid(), kind: x.kind, lat, lon, source: 'user', deviceId: s(x.deviceId).slice(0, 40), reporter: s(x.reporter).slice(0, 40),
     area: s(x.area).slice(0, 20), date: s(x.date).slice(0, 10), size: s(x.size).slice(0, 4), type: s(x.type).slice(0, 40), trigger: s(x.trigger).slice(0, 60), aspect: ASPECTS.includes(x.aspect) ? x.aspect : '',
     elevation: n(x.elevation), slope: n(x.slope), crown: n(x.crown), width: n(x.width), run: n(x.run), bed: s(x.bed).slice(0, 40), involve: s(x.involve).slice(0, 40),
     injured: n(x.injured) || 0, killed: n(x.killed) || 0, how: s(x.how).slice(0, 60), freq: s(x.freq).slice(0, 40), when: s(x.when).slice(0, 40), name: s(x.name).slice(0, 80), notes: s(x.notes),
-    createdAt: s(x.createdAt).slice(0, 30), updatedAt: s(x.updatedAt).slice(0, 30), verifications: {} };
+    createdAt: s(x.createdAt).slice(0, 30), updatedAt: s(x.updatedAt).slice(0, 30), verifications: {}, htype: HAZARDS.some(h => h.id === x.htype) ? x.htype : (x.kind === 'hazard' ? 'other' : undefined) };
   if (x.verifications && typeof x.verifications === 'object') Object.entries(x.verifications).slice(0, 200).forEach(([d, v]) => {
     if (v && (v.v === 'confirm' || v.v === 'dispute')) out.verifications[String(d).slice(0, 40)] = { v: v.v, reason: s(v.reason).slice(0, 60), note: s(v.note).slice(0, 200), name: s(v.name).slice(0, 40), at: s(v.at).slice(0, 30) };
   });
@@ -1253,6 +1320,7 @@ function showSettings() {
     '<div class="field"><label for="s-sat">Copernicus instance ID</label><input type="text" id="s-sat" autocomplete="off" spellcheck="false" value="' + esc(satId()) + '" placeholder="e.g. 1a2b3c4d-…"></div><button class="btn" id="sSat">Save and show satellite</button></div>';
   h += '<div class="field"><span class="lbl">Show red skulls for slides from</span><div class="seg" id="winSeg">' + [['week', 'This week'], ['month', 'This month'], ['season', 'This season']].map(([v, l]) => '<button type="button" data-v="' + v + '" class="' + (state.recentWindow === v ? 'on' : '') + '">' + l + '</button>').join('') + '</div><span class="help">Season counts from 1 November. Slides older than a week show faded.</span></div>';
   h += '<div class="stack"><p class="eyebrow">Elevation bands for ' + esc(a.name) + '</p><p class="small muted" style="margin:0">' + (a.bandsSource === 'JAN' ? 'Set from JAN\'s guide.' : 'These are estimates. If JAN or a local guide gives different heights, change them; the danger shading uses them.') + '</p><div class="grid3"><div class="field"><label for="s-alp">Alpine from (m)</label><input type="number" id="s-alp" value="' + bands.alpMin + '"></div><div class="field"><label for="s-tl">Treeline from (m)</label><input type="number" id="s-tl" value="' + bands.tlMin + '"></div><div class="field"><span class="lbl">&nbsp;</span><button class="btn" id="sBands">Save</button></div></div>' + (state.bandOverrides[a.id] ? '<button class="btn small ghost" id="sBandsReset">Reset to default</button>' : '') + '</div>';
+  h += '<button class="btn" id="sHelp">How to use this app</button>';
   h += '<div class="stack"><p class="eyebrow">About · version ' + APP_VERSION + '</p><p class="small muted" style="margin:0">Topo and elevation: Geospatial Information Authority of Japan (GSI). Onsens, parking and other places: © OpenStreetMap contributors. Avalanche bulletins and incident records: Japan Avalanche Network (nadare.jp), summarised. This app helps you plan. It does not replace avalanche training, a beacon, shovel and probe, or your own judgement on the day.</p></div>';
   openSheet('Settings', h, { view: 'settings', tall: true });
   $('#s-name').onchange = e => store.set('reporterName', e.target.value.trim());
@@ -1264,6 +1332,7 @@ function showSettings() {
     state.base = 'sat'; store.set('base', 'sat'); closeSheet(); Promise.resolve(setBase()).then(() => toast(sat.err || 'Satellite on'));
   };
   $('#sExport').onclick = exportPins;
+  $('#sHelp').onclick = showHelp;
   $('#sImport').onclick = () => $('#importFile').click();
   wireChips();
   $('#winSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; state.recentWindow = b.dataset.v; store.set('recentWindow', state.recentWindow); $('#winSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); renderPins(); toast('Red skulls: ' + WINDOW_LABEL[state.recentWindow], 1400); });
@@ -1274,6 +1343,43 @@ function showSettings() {
   };
   const rs = $('#sBandsReset'); if (rs) rs.onclick = () => { delete state.bandOverrides[a.id]; store.set('bandOverrides', state.bandOverrides); redrawShading(); showSettings(); };
 }
+
+/* ------------------------------------------------------------------ help guide */
+function btnSvg(id) { const b = $('#' + id); const s = b && b.querySelector('svg'); return s ? s.outerHTML : ''; }
+function showHelp() {
+  const row = (icon, title, text, cls = '') => '<div class="help-row"><span class="help-ico ' + cls + '">' + icon + '</span><span><b>' + title + '</b><br><span class="small muted">' + text + '</span></span></div>';
+  let h = '<p style="margin:0">A backcountry map for Japan: today\'s avalanche brief, where the steep and dangerous slopes are, slide reports from riders, and your routes. It works offline once you\'ve downloaded an area.</p>';
+  h += '<div class="stack"><p class="eyebrow">Before your trip (on Wi-Fi)</p><ol class="help-steps">' +
+    '<li>Tap the <b>area name</b> (top left) and pick where you\'re riding.</li>' +
+    '<li>Tap the <b>download</b> button and save that area for offline use.</li>' +
+    '<li>Optional: set up <b>Latest satellite</b> in Settings for current snow cover.</li>' +
+    '<li>Tap the coloured bars (top right) to read the <b>avalanche brief</b>.</li></ol></div>';
+  h += '<div class="stack"><p class="eyebrow">The buttons</p>' +
+    row('<b class="ab">Hakuba ⌄</b>', 'Area', 'Pick or add a riding area. Adjust its box.') +
+    row('<span class="bars"><i class="r3"></i><i class="r3"></i><i class="r2"></i></span>', 'Avalanche brief', 'Danger rating for alpine, treeline and below treeline, the problems, recent slides and links to the full bulletin.') +
+    row(btnSvg('layersBtn'), 'Layers', 'Satellite or topo, danger or slope shading, and what to show on the map.') +
+    row(btnSvg('aspectBtn'), 'Aspect', 'Colours slopes by the way they face. Strong colour = what today\'s report flags.') +
+    row(btnSvg('routesBtn'), 'Routes', 'Plan a route by tapping the map, see saved routes and tracks, share or import GPX.') +
+    row(btnSvg('recBtn'), 'Record', 'Track your trip: time, distance, climb and descent. Keep the app open while recording.') +
+    row(btnSvg('packsBtn'), 'Download', 'Save areas for offline use.') +
+    row(btnSvg('locateBtn'), 'My position', 'GPS dot plus your height, slope, aspect and the danger rating where you stand. Works without mobile signal.') +
+    row(btnSvg('addBtn'), 'Drop a pin', 'Report a slide, mark a slide path, or drop a hazard / handy marker. Or long-press the map.', 'red') +
+    row(btnSvg('settingsBtn'), 'Settings', 'Your name, share pins with mates, red skull time frame, satellite set-up, snow-zone heights.') + '</div>';
+  h += '<div class="stack"><p class="eyebrow">What the colours mean</p><div class="legend">' +
+    '<span><span class="sw" style="background:rgba(214,18,36,.6)"></span><b>Red shading:</b> stay off today</span>' +
+    '<span><span class="sw" style="background:rgba(247,148,30,.45)"></span><b>Amber shading:</b> only with good reason</span>' +
+    '<span>' + SKULL.replace('width="34" height="34"', 'width="18" height="18" style="vertical-align:-4px;margin-right:6px"') + '<b>Red skull:</b> recent avalanche</span>' +
+    '<span>' + PATH.replace('width="34" height="34"', 'width="18" height="18" style="vertical-align:-4px;margin-right:6px"') + '<b>Black pin:</b> known slide path</span>' +
+    '<span><span class="hz-pin tiny" style="background:#d97706">' + hazardSvg('rocks', 12) + '</span> <b>Markers:</b> amber hazard, red keep out, blue water, green good to know</span>' +
+    '<span><span class="sw" style="background:repeating-linear-gradient(90deg,#ff2bd6 0 6px,transparent 6px 9px);border:0"></span><b>Dashed magenta:</b> planned route</span>' +
+    '<span><span class="sw" style="background:#00b4ff;border:0"></span><b>Solid blue:</b> recorded track</span>' +
+    '<span class="muted">Dashed ring on a pin = nobody has confirmed it yet. Tap a pin to confirm or dispute it.</span></div></div>';
+  h += '<p class="small muted" style="margin:0">This app helps you plan. It doesn\'t replace avalanche training, a beacon, shovel and probe, or your own call on the day.</p>';
+  h += '<button class="btn primary" id="helpDone">Got it</button>';
+  openSheet('How to use Powder Pigs', h, { view: 'help', tall: true });
+  $('#helpDone').onclick = () => { store.set('seenHelp', true); closeSheet(); };
+}
+$('#helpBtn').addEventListener('click', showHelp);
 
 /* ------------------------------------------------------------------ wiring */
 $('#areaBtn').addEventListener('click', showAreaPicker);
@@ -1306,6 +1412,7 @@ async function boot() {
   state.bulletins = store.get('bulletinsCache', null); updateChip();
   renderPins();
   loadBulletins(true);
+  if (!store.get('seenHelp', false)) setTimeout(() => { if (!state.view) showHelp(); }, 900);
   if ('serviceWorker' in navigator) {
     // Always check for a new version, and when one takes over, reload once so old and new files never mix.
     const hadController = !!navigator.serviceWorker.controller;
