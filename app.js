@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.10';
+const APP_VERSION = '2026-10-15.11';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -723,6 +723,8 @@ function openSheet(title, html, opts = {}) {
   $('#sheetTitle').textContent = title;
   $('#sheetBody').innerHTML = html;
   $('#sheet').hidden = false; $('#sheet').classList.toggle('tall', !!opts.tall);
+  // On a laptop, panels opened from the top-left buttons drop down under them instead of on the right.
+  $('#sheet').classList.toggle('sheet-left', opts.anchor === 'left');
   $('#sheetBody').scrollTop = 0;
   state.view = opts.view || title;
 }
@@ -901,7 +903,7 @@ function showAreaPicker() {
     (mine.length ? '<div class="stack"><p class="eyebrow">Your areas</p><div class="list">' + mine.map(item).join('') + '</div></div>' : '') +
     '<div class="card"><b>Riding somewhere else?</b><span class="small muted">Frame it on the map and save it as your own area. It gets the same offline download, shading and pins. Share it with mates in your pins file.</span><button class="btn primary" id="addArea">Add your own area</button></div>' +
     '<button class="btn" id="goPacks">Manage downloads</button>';
-  openSheet('Where are you riding?', h, { view: 'areas', tall: true });
+  openSheet('Where are you riding?', h, { view: 'areas', tall: true, anchor: 'left' });
   const body = $('#sheetBody');
   body.querySelectorAll('[data-area]').forEach(el => el.onclick = () => { setArea(el.dataset.area, true); closeSheet(); });
   body.querySelectorAll('[data-box]').forEach(el => el.onclick = () => { const a = state.areas.find(x => x.id === el.dataset.box); setArea(a.id, false); map.fitBounds(a.bounds); startBox({ areaId: a.id }); });
@@ -969,7 +971,7 @@ function areaForm(existing, bounds) {
     regs.map(([k, r]) => '<option value="' + k + '"' + (a.region === k ? ' selected' : '') + '>' + esc(r.name) + '</option>').join('') + '</select><span class="help">Pick the nearest. The danger shading uses its ratings.</span></div>' +
     '<div class="grid3"><div class="field"><label for="a-alp">Alpine from m</label><input type="number" id="a-alp" value="' + a.bands.alpMin + '"></div><div class="field"><label for="a-tl">Treeline from m</label><input type="number" id="a-tl" value="' + a.bands.tlMin + '"></div><div></div></div>' +
     '<div id="aErr" class="err" hidden></div><div class="btn-row">' + (existing ? '<button class="btn" id="aDel">Delete area</button>' : '') + '<button class="btn primary" id="aSave">' + (existing ? 'Save' : 'Save area') + '</button></div>';
-  openSheet(existing ? 'Edit ' + a.name : 'New area', h, { view: 'areaform' });
+  openSheet(existing ? 'Edit ' + a.name : 'New area', h, { view: 'areaform', anchor: 'left' });
   $('#aSave').onclick = () => {
     const name = $('#a-name').value.trim(), alp = Number($('#a-alp').value), tl = Number($('#a-tl').value);
     const err = $('#aErr');
@@ -1376,7 +1378,7 @@ function showHelp() {
     '<span class="muted">Dashed ring on a pin = nobody has confirmed it yet. Tap a pin to confirm or dispute it.</span></div></div>';
   h += '<p class="small muted" style="margin:0">This app helps you plan. It doesn\'t replace avalanche training, a beacon, shovel and probe, or your own call on the day.</p>';
   h += '<button class="btn primary" id="helpDone">Got it</button>';
-  openSheet('How to use Powder Pigs', h, { view: 'help', tall: true });
+  openSheet('How to use Powder Pigs', h, { view: 'help', tall: true, anchor: 'left' });
   $('#helpDone').onclick = () => { store.set('seenHelp', true); closeSheet(); };
 }
 $('#helpBtn').addEventListener('click', showHelp);

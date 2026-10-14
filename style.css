@@ -333,3 +333,6 @@ body.recording .scale-hide, body.planning .leaflet-control-scale { visibility: h
 @media (max-width: 380px) { .chip-text { max-width: 26vw; } }
 .seg { min-height: 46px; flex-shrink: 0; }
 .sheet-body > * { min-height: min-content; }
+@media (min-width: 760px) {
+  .sheet.sheet-left { left: max(12px, env(safe-area-inset-left, 0px)); right: auto; top: calc(env(safe-area-inset-top, 0px) + 62px); bottom: auto; width: 400px; max-height: calc(100vh - 90px); }
+}
