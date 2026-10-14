@@ -1,9 +1,9 @@
 /* Offline support.
-   - App shell: cached on install, served cache-first.
+   - App shell: cached on install; network first so updates show at once, cached copy offline.
    - Map + elevation tiles: served from whichever area pack holds them; never cached on the fly,
      so storage only grows when you choose to download an area.
    - Bulletin: network first, last saved copy when offline. */
-const SHELL = 'shell-v4';
+const SHELL = 'shell-v5';
 const SHELL_FILES = ['./', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest',
   'vendor/leaflet.js', 'vendor/leaflet.css', 'icons/icon-192.png', 'icons/icon-512.png',
   'data/areas.json', 'data/known-slides.json', 'data/bulletins.json'];
@@ -30,7 +30,11 @@ self.addEventListener('fetch', e => {
     }).catch(() => caches.match(new URL('data/bulletins.json', self.registration.scope).href)));
     return;
   }
+  // App files: newest version when there's signal (so updates show straight away), saved copy when not.
   if (url.origin === location.origin) {
-    e.respondWith(caches.match(req, { ignoreSearch: true }).then(hit => hit || fetch(req)));
+    e.respondWith(fetch(req, { cache: 'no-cache' }).then(r => {
+      if (r.ok && !url.search) { const copy = r.clone(); caches.open(SHELL).then(c => c.put(req, copy)); }
+      return r;
+    }).catch(() => caches.match(req, { ignoreSearch: true })));
   }
 });
