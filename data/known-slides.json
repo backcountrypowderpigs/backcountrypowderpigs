@@ -1,0 +1,221 @@
+{
+  "_note": "Seed list of known slide paths from the Japan Avalanche Network incident database (data.nadare.jp/incidents). Places with lat/lon were checked against GSI place-name search. Others carry a GSI search name and are located when the area pack downloads; ones that can't be located stay in the list as 'not placed'. These are fatal incidents only - plenty of other paths slide regularly. Riders add those as pins.",
+  "slides": [
+    {
+      "id": "jan-368",
+      "area": "hakuba",
+      "name": "Happo-one, Kuzure-sawa",
+      "nameJa": "八方尾根 崩沢",
+      "geocode": "崩沢",
+      "incidents": [
+        {
+          "date": "2024-01-14",
+          "summary": "Guided group. Second rider stopped in the slope and triggered it; fully buried 50 cm, killed. Size 2 persistent slab, north aspect, 1590 m start, 50 m wide crown 10-70 cm deep, faceted weak layer on a melt-freeze crust. Ran 534 m.",
+          "killed": 1,
+          "injured": 0,
+          "url": "https://data.nadare.jp/incidents/368"
+        }
+      ],
+      "type": "persistent",
+      "aspect": "N"
+    },
+    {
+      "id": "jan-362",
+      "area": "hakuba",
+      "name": "Hakuba Norikura, Tenguppara east slopes",
+      "nameJa": "白馬乗鞍岳 天狗原東斜面",
+      "lat": 36.7829,
+      "lon": 137.8144,
+      "incidents": [
+        {
+          "date": "2023-01-29",
+          "summary": "Four people caught, two killed, two injured.",
+          "killed": 2,
+          "injured": 2,
+          "url": "https://data.nadare.jp/incidents/362"
+        }
+      ]
+    },
+    {
+      "id": "jan-355",
+      "area": "hakuba",
+      "name": "Karamatsu-sawa (south falls)",
+      "nameJa": "唐松沢 南滝",
+      "lat": 36.7058,
+      "lon": 137.7724,
+      "incidents": [
+        {
+          "date": "2022-02-19",
+          "summary": "Two people caught, one killed.",
+          "killed": 1,
+          "injured": 0,
+          "url": "https://data.nadare.jp/incidents/355"
+        }
+      ]
+    },
+    {
+      "id": "jan-341",
+      "area": "hakuba",
+      "name": "Hieda-yama, Kurokawa-sawa (Otari)",
+      "nameJa": "稗田山 黒川沢",
+      "geocode": "稗田山",
+      "incidents": [
+        {
+          "date": "2019-02-14",
+          "summary": "One person caught and killed.",
+          "killed": 1,
+          "injured": 0,
+          "url": "https://data.nadare.jp/incidents/341"
+        }
+      ]
+    },
+    {
+      "id": "jan-334",
+      "area": "hakuba",
+      "name": "Kobasami, Funakoshi-no-kashira",
+      "nameJa": "小蓮華山 船越ノ頭",
+      "geocode": "船越ノ頭",
+      "incidents": [
+        {
+          "date": "2018-01-20",
+          "summary": "One person caught and killed.",
+          "killed": 1,
+          "injured": 0,
+          "url": "https://data.nadare.jp/incidents/334"
+        }
+      ]
+    },
+    {
+      "id": "jan-330",
+      "area": "hakuba",
+      "name": "Shirouma Daisekkei, Negidaira",
+      "nameJa": "白馬大雪渓 葱平",
+      "geocode": "葱平",
+      "incidents": [
+        {
+          "date": "2017-04-28",
+          "summary": "Spring. Two people caught, one killed.",
+          "killed": 1,
+          "injured": 0,
+          "url": "https://data.nadare.jp/incidents/330"
+        }
+      ]
+    },
+    {
+      "id": "jan-370",
+      "area": "myoko",
+      "name": "Mitahara-yama",
+      "nameJa": "三田原山",
+      "lat": 36.8924,
+      "lon": 138.1028,
+      "incidents": [
+        {
+          "date": "2024-02-28",
+          "summary": "One person caught and killed.",
+          "killed": 1,
+          "injured": 0,
+          "url": "https://data.nadare.jp/incidents/370"
+        }
+      ]
+    },
+    {
+      "id": "jan-339",
+      "area": "arai",
+      "name": "Okemuri-yama",
+      "nameJa": "大毛無山",
+      "geocode": "大毛無山",
+      "incidents": [
+        {
+          "date": "2019-01-25",
+          "summary": "One person caught and killed.",
+          "killed": 1,
+          "injured": 0,
+          "url": "https://data.nadare.jp/incidents/339"
+        }
+      ]
+    },
+    {
+      "id": "jan-366",
+      "area": "niseko",
+      "name": "Niseko Annupuri, Yunosawa",
+      "nameJa": "ニセコアンヌプリ 湯の沢",
+      "geocode": "湯ノ沢",
+      "incidents": [
+        {
+          "date": "2023-03-12",
+          "summary": "One person caught and killed.",
+          "killed": 1,
+          "injured": 0,
+          "url": "https://data.nadare.jp/incidents/366"
+        }
+      ]
+    },
+    {
+      "id": "jan-375",
+      "area": "niseko",
+      "name": "Yotei, No.148 gully",
+      "nameJa": "羊蹄山 148号の沢",
+      "incidents": [
+        {
+          "date": "2024-03-11",
+          "summary": "Three people caught, two killed, one injured.",
+          "killed": 2,
+          "injured": 1,
+          "url": "https://data.nadare.jp/incidents/375"
+        }
+      ]
+    },
+    {
+      "id": "jan-yotei-hirafu",
+      "area": "niseko",
+      "name": "Yotei, Hirafu route",
+      "nameJa": "羊蹄山 比羅夫ルート",
+      "incidents": [
+        {
+          "date": "2023-01-13",
+          "summary": "Working (guide) party. One killed.",
+          "killed": 1,
+          "injured": 0,
+          "url": "https://data.nadare.jp/incidents/359"
+        },
+        {
+          "date": "2018-03-18",
+          "summary": "One person caught and killed.",
+          "killed": 1,
+          "injured": 0,
+          "url": "https://data.nadare.jp/incidents/336"
+        }
+      ]
+    },
+    {
+      "id": "jan-365",
+      "area": "niseko",
+      "name": "Yotei, Makkari route",
+      "nameJa": "羊蹄山 真喜茂ルート",
+      "incidents": [
+        {
+          "date": "2023-03-05",
+          "summary": "One person caught and killed.",
+          "killed": 1,
+          "injured": 0,
+          "url": "https://data.nadare.jp/incidents/365"
+        }
+      ]
+    },
+    {
+      "id": "jan-346",
+      "area": "niseko",
+      "name": "Yotei, Kimobetsu side",
+      "nameJa": "羊蹄山 喜茂別",
+      "incidents": [
+        {
+          "date": "2020-02-10",
+          "summary": "One person caught and killed.",
+          "killed": 1,
+          "injured": 0,
+          "url": "https://data.nadare.jp/incidents/346"
+        }
+      ]
+    }
+  ]
+}

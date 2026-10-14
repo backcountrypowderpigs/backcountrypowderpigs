@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Backcountry Powder Pigs</title>
+<meta name="description" content="Backcountry avalanche map for Japan: GSI topo, JAN bulletin brief, slide pins, offline area packs.">
+<meta name="theme-color" content="#123048">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Powder Pigs">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map" aria-label="Map"></div>
+
+<header class="topbar">
+  <button id="areaBtn" class="area-btn" aria-haspopup="dialog">
+    <span id="areaName">Hakuba</span><span id="areaNameJa" class="ja">白馬</span>
+    <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+  </button>
+  <button id="briefChip" class="brief-chip" aria-label="Open avalanche brief">
+    <span class="bands" id="chipBands">
+      <i data-b="alp"></i><i data-b="tl"></i><i data-b="btl"></i>
+    </span>
+    <span class="chip-text" id="chipText">Brief</span>
+  </button>
+</header>
+
+<div id="offlineFlag" class="offline-flag" hidden>Offline</div>
+<button id="satFlag" class="sat-flag" hidden></button>
+
+<div id="boxBar" hidden>
+  <div id="boxFrame" class="box-frame" aria-hidden="true"></div>
+  <div class="place-panel">
+    <div class="place-title" id="boxTitle">Frame the area you'll ride</div>
+    <div class="small muted" id="boxInfo"></div>
+    <div class="place-actions">
+      <button type="button" id="boxCancel" class="btn ghost">Cancel</button>
+      <button type="button" id="boxOk" class="btn primary">Use this box</button>
+    </div>
+  </div>
+</div>
+
+<div class="fabs">
+  <button id="layersBtn" class="fab" aria-label="Layers">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5zm-9 9l9 5 9-5M3 16l9 5 9-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+  </button>
+  <button id="packsBtn" class="fab" aria-label="Area downloads">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 4v11m-5-5l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+  <button id="locateBtn" class="fab" aria-label="Show my position">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+  </button>
+  <button id="addBtn" class="fab fab-main" aria-label="Report a slide">
+    <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+  </button>
+  <button id="settingsBtn" class="fab fab-small" aria-label="Settings">
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+  </button>
+</div>
+
+<div id="readout" class="readout" hidden></div>
+
+<div id="placeBar" class="place-bar" hidden>
+  <div class="crosshair" aria-hidden="true"></div>
+  <div class="place-panel">
+    <div class="place-title" id="placeTitle">Move the map to put the cross on the slide</div>
+    <div class="seg" id="placeKind" role="radiogroup">
+      <button type="button" data-v="recent" class="on">Recent slide</button>
+      <button type="button" data-v="path">Known slide path</button>
+    </div>
+    <div class="place-actions">
+      <button type="button" id="placeCancel" class="btn ghost">Cancel</button>
+      <button type="button" id="placeOk" class="btn primary">Drop pin here</button>
+    </div>
+  </div>
+</div>
+
+<section id="sheet" class="sheet" role="dialog" aria-modal="false" aria-labelledby="sheetTitle" hidden>
+  <div class="sheet-grip" id="sheetGrip"></div>
+  <div class="sheet-head">
+    <h2 id="sheetTitle">Brief</h2>
+    <button id="sheetClose" class="icon-btn" aria-label="Close">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+  <div class="sheet-body" id="sheetBody"></div>
+</section>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<input type="file" id="importFile" accept="application/json,.json" hidden>
+
+<script src="vendor/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

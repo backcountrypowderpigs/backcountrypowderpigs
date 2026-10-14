@@ -1,0 +1,59 @@
+{
+  "_note": "To add a built-in area: copy an entry, give it a new id, a box (bounds: [[south, west], [north, east]]), the JAN region whose bulletin covers it, and band heights. Riders can also add their own areas inside the app (Area menu > Add your own area). Band heights: Hakuba from JAN's guide; all others are estimates, editable in Settings. Boxes marked boxCheck are approximate; check them on the map before downloading.",
+  "regions": {
+    "hakuba":   { "name": "Hakuba",                 "janAreaId": 2, "links": [ { "label": "JAN Hakuba bulletin", "url": "https://data.nadare.jp/avalanche_informations?area_id=2&locale=en" }, { "label": "JAN field observations, Hakuba", "url": "https://data.nadare.jp/observations?area_id=20" } ] },
+    "myoko":    { "name": "Myoko",                  "janAreaId": 3, "links": [ { "label": "JAN Myoko bulletin", "url": "https://data.nadare.jp/avalanche_informations?area_id=3&locale=en" }, { "label": "JAN field observations, Myoko-Togakushi", "url": "https://data.nadare.jp/observations?area_id=17" } ] },
+    "kagura":   { "name": "Kagura-Tanigawa-Hotaka", "janAreaId": 4, "links": [ { "label": "JAN Kagura-Tanigawa-Hotaka bulletin", "url": "https://data.nadare.jp/avalanche_informations?area_id=4&locale=en" }, { "label": "JAN field observations, Tanigawa-Kagura", "url": "https://data.nadare.jp/observations?area_id=14" } ] },
+    "niseko":   { "name": "Niseko-Yotei-Yoichi",    "janAreaId": 6, "links": [ { "label": "Niseko Avalanche Institute (daily, gate status)", "url": "https://niseko.nadare.info/" }, { "label": "JAN Niseko-Yotei-Yoichi bulletin", "url": "https://data.nadare.jp/avalanche_informations?area_id=6&locale=en" }, { "label": "JAN field observations, Shiribeshi", "url": "https://data.nadare.jp/observations?area_id=3" } ] },
+    "daisetsu": { "name": "Daisetsu-Tokachi",       "janAreaId": 7, "links": [ { "label": "JAN Daisetsu-Tokachi bulletin", "url": "https://data.nadare.jp/avalanche_informations?area_id=7&locale=en" }, { "label": "JAN field observations, Daisetsu-Tokachi", "url": "https://data.nadare.jp/observations?area_id=1" } ] },
+    "tateyama": { "name": "Tateyama",               "janAreaId": 1, "links": [ { "label": "JAN Tateyama bulletin", "url": "https://data.nadare.jp/avalanche_informations?area_id=1&locale=en" } ] }
+  },
+  "areas": [
+    { "id": "hakuba", "name": "Hakuba", "nameJa": "白馬", "center": [36.705, 137.83], "zoom": 12,
+      "bounds": [[36.60, 137.70], [36.86, 137.95]], "bands": { "alpMin": 2200, "tlMin": 1900 }, "bandsSource": "JAN",
+      "region": "hakuba", "links": [ { "label": "Hakuba Valley resorts and trail maps", "url": "https://www.hakubavalley.com/" } ] },
+
+    { "id": "myoko", "name": "Myoko", "nameJa": "妙高", "center": [36.895, 138.12], "zoom": 13,
+      "bounds": [[36.83, 138.01], [36.97, 138.23]], "bands": { "alpMin": 2100, "tlMin": 1600 }, "bandsSource": "estimate",
+      "region": "myoko", "links": [] },
+
+    { "id": "arai", "name": "Lotte Arai", "nameJa": "ロッテアライ", "center": [36.995, 138.17], "zoom": 13,
+      "bounds": [[36.94, 138.08], [37.06, 138.26]], "bands": { "alpMin": 1450, "tlMin": 1150 }, "bandsSource": "estimate", "boxCheck": true,
+      "region": "myoko", "regionNote": "Nearest JAN bulletin is Myoko",
+      "links": [ { "label": "Lotte Arai Resort (official, trail map)", "url": "https://www.lottehotel.com/arai-resort/ja.html" } ] },
+
+    { "id": "charmant", "name": "Charmant Hiuchi", "nameJa": "シャルマン火打", "center": [36.97, 137.99], "zoom": 13,
+      "bounds": [[36.90, 137.89], [37.03, 138.09]], "bands": { "alpMin": 2000, "tlMin": 1500 }, "bandsSource": "estimate", "boxCheck": true,
+      "region": "myoko", "regionNote": "Nearest JAN bulletin is Myoko (covers Mt Hiuchi). Itoigawa side gets more maritime snow; read it with care.",
+      "links": [ { "label": "Charmant Hiuchi (official, trail map)", "url": "http://charmant-hiuchi.jp/" } ] },
+
+    { "id": "kagura", "name": "Kagura", "nameJa": "かぐら", "center": [36.86, 138.75], "zoom": 13,
+      "bounds": [[36.80, 138.66], [36.93, 138.84]], "bands": { "alpMin": 1900, "tlMin": 1600 }, "bandsSource": "estimate", "boxCheck": true,
+      "region": "kagura",
+      "links": [ { "label": "Kagura (Prince, official, trail map)", "url": "https://www.princehotels.co.jp/ski/kagura/" } ] },
+
+    { "id": "niseko", "name": "Niseko", "nameJa": "ニセコ", "center": [42.86, 140.70], "zoom": 12,
+      "bounds": [[42.76, 140.52], [42.93, 140.88]], "bands": { "alpMin": 1000, "tlMin": 750 }, "bandsSource": "estimate",
+      "region": "niseko", "links": [ { "label": "Niseko United (official, trail map, gates)", "url": "https://www.niseko.ne.jp/en/" } ] },
+
+    { "id": "rusutsu", "name": "Rusutsu", "nameJa": "ルスツ", "center": [42.75, 140.90], "zoom": 13,
+      "bounds": [[42.69, 140.82], [42.81, 141.00]], "bands": { "alpMin": 1000, "tlMin": 750 }, "bandsSource": "estimate",
+      "region": "niseko", "regionNote": "Covered by JAN Niseko-Yotei-Yoichi; the Niseko Avalanche Institute bulletin is Niseko-specific",
+      "links": [ { "label": "Rusutsu Resort (official, trail map)", "url": "https://rusutsu.com/" } ] },
+
+    { "id": "kiroro", "name": "Kiroro", "nameJa": "キロロ", "center": [43.075, 140.98], "zoom": 13,
+      "bounds": [[43.00, 140.88], [43.16, 141.08]], "bands": { "alpMin": 1250, "tlMin": 1000 }, "bandsSource": "estimate", "boxCheck": true,
+      "region": "niseko", "regionNote": "Covered by JAN Niseko-Yotei-Yoichi (Yoichi)",
+      "links": [ { "label": "Kiroro Resort (official, trail map)", "url": "https://www.kiroro.co.jp/" } ] },
+
+    { "id": "furano", "name": "Furano", "nameJa": "富良野", "center": [43.33, 142.35], "zoom": 13,
+      "bounds": [[43.27, 142.26], [43.40, 142.44]], "bands": { "alpMin": 1200, "tlMin": 950 }, "bandsSource": "estimate", "boxCheck": true,
+      "region": "daisetsu", "regionNote": "Nearest JAN bulletin is Daisetsu-Tokachi, which mainly covers the higher Tokachi and Daisetsu ranges",
+      "links": [ { "label": "Furano (Prince, official, trail map)", "url": "https://www.princehotels.co.jp/ski/furano/" } ] },
+
+    { "id": "asahidake", "name": "Asahidake", "nameJa": "旭岳", "center": [43.66, 142.82], "zoom": 13,
+      "bounds": [[43.61, 142.73], [43.71, 142.91]], "bands": { "alpMin": 1600, "tlMin": 1300 }, "bandsSource": "estimate",
+      "region": "daisetsu",
+      "links": [ { "label": "Asahidake Ropeway (official)", "url": "https://asahidake.hokkaido.jp/" } ] }
+  ]
+}
