@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.18';
+const APP_VERSION = '2026-10-15.19';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -620,7 +620,8 @@ function nearestResort(labels, lat, lon) {
 const RUN_COL = { novice: '#1f9d55', easy: '#1f9d55', intermediate: '#d42a2a', advanced: '#111', expert: '#111', freeride: '#111' };
 // Listed natural onsens (data/natural-onsens.json) on top of the area's places; drops any plain onsen dot sitting on one.
 function withWildOnsens(points, areaId) {
-  const seeds = (state.wildSeeds || []).filter(o => o.area === areaId && o.lat != null)
+  const bx = L.latLngBounds(state.area.bounds);
+  const seeds = (state.wildSeeds || []).filter(o => o.area === areaId && o.lat != null && bx.contains([o.lat, o.lon]))
     .filter(o => !points.some(p => p.id === o.id))
     .map(o => ({ c: 'wild', id: o.id, lat: o.lat, lon: o.lon, name: o.en || o.ja, ja: o.ja || '', en: o.en || '', ele: o.ele, season: o.season, access: o.access, note: o.note }));
   if (!seeds.length) return points;
@@ -1443,6 +1444,13 @@ function netFlag() { $('#offlineFlag').hidden = navigator.onLine; updateNativeZo
 window.addEventListener('online', () => { netFlag(); loadBulletins(true); });
 window.addEventListener('offline', netFlag);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && navigator.onLine) loadBulletins(); });
+
+// Every icon button gets a hover description: copy its aria-label into title where one is missing.
+function addHoverTitles(root) {
+  (root.querySelectorAll ? root.querySelectorAll('button[aria-label]:not([title]), a[aria-label]:not([title])') : []).forEach(b => { b.title = b.getAttribute('aria-label'); });
+}
+addHoverTitles(document);
+new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) { addHoverTitles(n); if (n.matches && n.matches('button[aria-label]:not([title])')) n.title = n.getAttribute('aria-label'); } }))).observe(document.body, { childList: true, subtree: true });
 
 async function boot() {
   try {

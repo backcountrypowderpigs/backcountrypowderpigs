@@ -147,13 +147,13 @@ def dist_m(a, b, c, d):
 
 def place_seeds(area, points):
     """Natural onsens from data/natural-onsens.json. Ones without a position are found on OpenStreetMap by name
-    (searching a little beyond the area box, since some sit just outside it)."""
+    (inside the area box only)."""
     seeds = seeds_for(area['id'])
     need = [o for o in seeds if o.get('lat') is None and o.get('find')]
     found = {}
     if need:
         s, w = area['bounds'][0]; n, e = area['bounds'][1]
-        bb = f'{s - .08},{w - .08},{n + .08},{e + .08}'
+        bb = f'{s},{w},{n},{e}'
         rx = '|'.join(re.escape(o['find']) for o in need)
         try:
             j = overpass(f'[out:json][timeout:60];nwr["name"~"{rx}"]({bb});out center tags;')
