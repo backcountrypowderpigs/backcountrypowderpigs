@@ -340,3 +340,7 @@ body.recording .scale-hide, body.planning .leaflet-control-scale { visibility: h
 .sheet-body { display: flex; flex-direction: column; gap: 18px; min-height: 0; flex: 1 1 auto; }
 .sheet-body > * { flex: 0 0 auto; min-height: auto; }
 .sheet-head, .sheet-grip { flex: 0 0 auto; }
+.grade-box { display: grid; gap: 4px; font-size: 14px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.grade-box .k { display: inline-block; min-width: 116px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; }
+.grade-warn { color: var(--warn); font-weight: 600; }
+.g-ok { color: inherit; } .g-steep { color: #d97706; } .g-vsteep { color: #dc2626; } .g-boot { color: #7c3aed; }

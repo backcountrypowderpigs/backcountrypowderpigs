@@ -10,6 +10,18 @@
   const PLAN_COL = '#ff2bd6', TRACK_COL = '#00b4ff';
   const routes = store.get('routes', []);
   const visible = new Set(store.get('routesVisible', []));
+  // Steep-section glow sits under the route lines.
+  map.createPane('routeGlow'); map.getPane('routeGlow').style.zIndex = 395; map.getPane('routeGlow').style.pointerEvents = 'none';
+  /* How steep is too steep (common backcountry rules of thumb, splitboard or skis):
+     Going UP, the route's own grade:  up to ~15° comfortable skin track; 20-25° steep skinning (heel risers, good edges);
+       25-30° very steep: kick turns, ski crampons if firm; 30°+ usually boot-pack instead.
+     Going DOWN, the slope you're riding: 35-40° steep; 40-45° very steep, no-fall terrain likely; 45°+ extreme.
+     Separately, any ground of 30°+ is avalanche terrain (shown in the stats). */
+  const GRADE = {
+    up: [[30, 'boot', 'Boot-pack (30°+ uphill)'], [25, 'vsteep', 'Very steep skin: kick turns (25–30°)'], [20, 'steep', 'Steep skin (20–25°)']],
+    down: [[45, 'boot', 'Extreme descent (45°+)'], [40, 'vsteep', 'Very steep descent (40–45°)'], [35, 'steep', 'Steep descent (35–40°)']],
+  };
+  const GLOW = { steep: '#f59e0b', vsteep: '#ef4444', boot: '#7c3aed' };
   const routeLayer = L.layerGroup().addTo(map);
   const liveLayer = L.layerGroup().addTo(map);
   const save = () => { store.set('routes', routes); store.set('routesVisible', [...visible]); };
@@ -55,7 +67,23 @@
     }
     const sl = samples.filter(s => s.slope != null);
     const steep = sl.filter(s => s.slope >= 30).length;
+    // Grade of the line itself, from smoothed elevation (~100 m window) so DEM noise doesn't spike it.
+    const sm = samples.map((s, i) => { let t = 0, n = 0; for (let k = i - 2; k <= i + 2; k++) { const e = samples[k] && samples[k].ele; if (e != null) { t += e; n++; } } return n ? t / n : null; });
+    let maxUp = 0, maxDown = 0, upSteepM = 0; const segs = []; let run = null;
+    for (let i = 1; i < samples.length; i++) {
+      const a = samples[i - 1], b = samples[i], dd = b.d - a.d;
+      let cls = null, kind = null;
+      if (sm[i] != null && sm[i - 1] != null && dd > 0) {
+        const g = Math.atan2(sm[i] - sm[i - 1], dd) * 180 / Math.PI;
+        if (g > 1) { kind = 'up'; maxUp = Math.max(maxUp, g); if (g >= 20) upSteepM += dd; const c = GRADE.up.find(([t]) => g >= t); cls = c ? c[1] : null; }
+        else { kind = 'down'; const gs = b.slope || 0; maxDown = Math.max(maxDown, gs); const c = GRADE.down.find(([t]) => gs >= t); cls = c ? c[1] : null; }
+      }
+      if (cls && run && run.cls === cls && run.kind === kind) { run.pts.push([+b.lat.toFixed(5), +b.lon.toFixed(5)]); run.d1 = Math.round(b.d); }
+      else if (cls) { run = { cls, kind, pts: [[+a.lat.toFixed(5), +a.lon.toFixed(5)], [+b.lat.toFixed(5), +b.lon.toFixed(5)]], d0: Math.round(a.d), d1: Math.round(b.d) }; segs.push(run); }
+      else run = null;
+    }
     return {
+      maxUp: Math.round(maxUp), maxDown: Math.round(maxDown), upSteepM: Math.round(upSteepM), segs,
       dist: cum, gain: c.gain, loss: c.loss, est: hours * 3600,
       maxSlope: sl.length ? Math.max(...sl.map(s => s.slope)) : null,
       steepPct: sl.length ? Math.round(100 * steep / sl.length) : null,
@@ -86,10 +114,14 @@
       L.polyline(latlngs, { color: col, weight, opacity, dashArray: dashed ? '10 8' : null, lineCap: dashed ? 'butt' : 'round' }),
     ];
   }
+  function glow(segs, layer) {
+    (segs || []).forEach(s => layer.addLayer(L.polyline(s.pts, { pane: 'routeGlow', color: GLOW[s.cls], weight: 15, opacity: 0.7, lineCap: 'round', lineJoin: 'round', interactive: false })));
+  }
   function drawSaved() {
     routeLayer.clearLayers();
     routes.filter(r => visible.has(r.id)).forEach(r => {
       const ll = r.pts.map(p => [p[0], p[1]]); if (ll.length < 2) return;
+      if (r.type === 'plan') glow(r.stats && r.stats.segs, routeLayer);
       const parts = cased(ll, r.type === 'plan' ? PLAN_COL : TRACK_COL, r.type === 'plan', 4, 0.9);
       parts[2].on('click', () => openRoute(r.id));
       parts.forEach(p => routeLayer.addLayer(p));
@@ -98,7 +130,7 @@
     });
   }
 
-  function profileSvg(profile) {
+  function profileSvg(profile, segs) {
     const pts = (profile || []).filter(p => p[1] != null);
     if (pts.length < 2) return '<p class="small muted" style="margin:0">No elevation data here yet. Download this area, or open it with signal, to see the profile.</p>';
     const W = 300, H = 90, pad = 4, maxD = pts[pts.length - 1][0] || 1;
@@ -107,7 +139,8 @@
     const line = xy.map(p => p.join(',')).join(' ');
     return '<svg class="profile" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="Elevation profile">' +
       '<polygon points="' + pad + ',' + (H - pad) + ' ' + line + ' ' + (W - pad) + ',' + (H - pad) + '" class="profile-fill"/>' +
-      '<polyline points="' + line + '" class="profile-line"/></svg>' +
+      '<polyline points="' + line + '" class="profile-line"/>' +
+      (segs || []).map(s => '<rect x="' + (pad + (W - 2 * pad) * s.d0 / maxD).toFixed(1) + '" y="' + (H - 6) + '" width="' + Math.max(1.5, (W - 2 * pad) * (s.d1 - s.d0) / maxD).toFixed(1) + '" height="6" fill="' + GLOW[s.cls] + '"/>').join('') + '</svg>' +
       '<div class="spread small muted"><span>' + Math.round(lo) + ' m low</span><span>' + Math.round(hi) + ' m high</span><span>' + fmtKm(maxD) + '</span></div>';
   }
   function statsHtml(r) {
@@ -117,9 +150,24 @@
     if (r.type === 'plan') h += cell('Est. time', s.est ? fmtDur(s.est) : '–');
     else h += cell('Time', fmtDur(s.time || 0)) + cell('Moving', fmtDur(s.moving || 0));
     h += '</div>';
-    if (r.type === 'plan' && s.maxSlope != null) h += '<p class="small" style="margin:0">Steepest point <b>' + s.maxSlope + '°</b>. <b>' + s.steepPct + '%</b> of the line is on 30° or steeper' + (s.steepPct > 0 ? ': check it against today\'s danger shading.' : '.') + '</p>';
+    if (r.type === 'plan' && s.maxUp != null) {
+      const warn = [];
+      if (s.maxUp >= 30) warn.push('Some of the climb is 30°+: plan to boot-pack, or add switchbacks to ease it.');
+      else if (s.maxUp >= 25) warn.push('Climb reaches 25–30°: kick turns, and ski crampons if it\'s firm.');
+      if (s.maxDown >= 40) warn.push('Descent crosses 40°+ ground: no-fall terrain likely.');
+      h += '<div class="grade-box"><div><span class="k">Skinning</span> steepest <b>' + s.maxUp + '°</b>' + (s.upSteepM ? ' · ' + fmtKm(s.upSteepM) + ' over 20°' : '') + '</div>' +
+        '<div><span class="k">Riding</span> steepest ground <b>' + s.maxDown + '°</b></div>' +
+        (s.maxSlope != null ? '<div><span class="k">Avalanche terrain</span> <b>' + s.steepPct + '%</b> of the line is on 30°+ ground</div>' : '') +
+        warn.map(w => '<div class="grade-warn">' + w + '</div>').join('') + '</div>' + gradeLegend();
+    } else if (r.type === 'plan' && s.maxSlope != null) h += '<p class="small" style="margin:0">Steepest point <b>' + s.maxSlope + '°</b>. <b>' + s.steepPct + '%</b> of the line is on 30° or steeper.</p>';
     if (r.type === 'plan') h += '<p class="small muted" style="margin:0">Time is a touring estimate (Munter: 4 units/h up, 10 down). Your pace will differ.</p>';
     return h;
+  }
+
+  function gradeLegend() {
+    return '<div class="legend small"><span><span class="sw" style="background:' + GLOW.steep + ';border:0"></span>Steep: skin 20–25° / ride 35–40°</span>' +
+      '<span><span class="sw" style="background:' + GLOW.vsteep + ';border:0"></span>Very steep: skin 25–30° (kick turns) / ride 40–45°</span>' +
+      '<span><span class="sw" style="background:' + GLOW.boot + ';border:0"></span>Boot-pack: skin 30°+ / ride 45°+</span></div>';
   }
 
   /* ---------- planning ---------- */
@@ -154,7 +202,9 @@
     clearTimeout(planTimer);
     if (plan.pts.length > 1) planTimer = setTimeout(async () => {
       const s = await analyseLine(plan.pts); if (!plan) return; plan.stats = s;
-      const el = $('#planStats'); if (el) el.innerHTML = fmtKm(s.dist) + ' · ↑ ' + s.gain + ' m · ↓ ' + s.loss + ' m · ~' + fmtDur(s.est) + (s.maxSlope != null ? ' · max ' + s.maxSlope + '°' : '');
+      glow(s.segs, liveLayer);
+      const el = $('#planStats'); if (el) el.innerHTML = fmtKm(s.dist) + ' · ↑ ' + s.gain + ' m · ↓ ' + s.loss + ' m · ~' + fmtDur(s.est) +
+        (s.hasEle ? ' · skin max <b class="g-' + (s.maxUp >= 30 ? 'boot' : s.maxUp >= 25 ? 'vsteep' : s.maxUp >= 20 ? 'steep' : 'ok') + '">' + s.maxUp + '°</b> · ride max <b class="g-' + (s.maxDown >= 45 ? 'boot' : s.maxDown >= 40 ? 'vsteep' : s.maxDown >= 35 ? 'steep' : 'ok') + '">' + s.maxDown + '°</b>' : '');
     }, 250);
   }
   function endPlan() { map.off('click', onPlanClick); plan = null; liveLayer.clearLayers(); bar.hidden = true; document.body.classList.remove('planning'); }
@@ -252,12 +302,16 @@
   }
   function openRoute(id, fresh) {
     const r = routes.find(x => x.id === id); if (!r) return;
+    if (r.type === 'plan' && r.stats && r.stats.maxUp == null && !r._upgrading) {
+      r._upgrading = true;
+      analyseLine(r.pts.map(p => [p[0], p[1]])).then(s => { r.stats = s; delete r._upgrading; save(); drawSaved(); if (state.view === 'route') openRoute(id); });
+    }
     visible.add(r.id); save(); drawSaved();
     try { map.fitBounds(L.latLngBounds(r.pts.map(p => [p[0], p[1]])), { padding: [40, 40], maxZoom: 15 }); } catch (e) { }
     let h = '';
     if (r.pending) h += '<div class="card"><b>Keep this track?</b><span class="small muted">Name it and keep it, or throw it away.</span></div>';
     h += '<div class="field"><label for="rName">Name</label><input type="text" id="rName" maxlength="60" value="' + esc(r.name) + '"></div>';
-    h += statsHtml(r) + profileSvg(r.stats.profile);
+    h += statsHtml(r) + profileSvg(r.stats.profile, r.type === 'plan' ? r.stats.segs : null);
     h += '<div class="btn-row">' + (r.pending ? '<button class="btn primary" id="rKeep">Keep</button><button class="btn" id="rDiscard">Discard</button>'
       : '<button class="btn" id="rShare">Share GPX</button>' + (r.type === 'plan' ? '<button class="btn" id="rEdit">Edit line</button>' : '') + '<button class="btn" id="rDel">Delete</button>') + '</div>';
     if (r.pending) h += '<button class="btn small ghost" id="rShare">Share GPX</button>';
