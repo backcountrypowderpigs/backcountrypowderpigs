@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.5';
+const APP_VERSION = '2026-10-15.6';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -49,7 +49,7 @@ const state = {
   slides: [], pins: store.get('pins', []),
   shade: store.get('shade', 'danger'), base: store.get('base', 'sat') === 'topo' ? 'topo' : 'sat',
   show: Object.assign({ recent: true, path: true, onsen: true, parking: true, hut: true, shop: true, lifts: true, labels: true }, store.get('show', {})),
-  recentDays: store.get('recentDays', 14),
+  recentWindow: ['week', 'month', 'season'].includes(store.get('recentWindow', '')) ? store.get('recentWindow', '') : 'week',
   aspectSel: store.get('aspectSel', ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']), aspectMatch: store.get('aspectMatch', true),
   aspectOn: store.get('aspectOn', store.get('shade', '') === 'aspect'),
   bandOverrides: store.get('bandOverrides', {}),
@@ -64,6 +64,14 @@ const $ = (s, r = document) => r.querySelector(s);
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function toast(msg, ms = 2600) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, ms); }
 function today() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+// Red skull time window. Season = since 1 November (the most recent one that has passed).
+const WINDOW_LABEL = { week: 'this week', month: 'this month', season: 'this season' };
+function seasonStart() { const n = new Date(); const y = n.getMonth() >= 10 ? n.getFullYear() : n.getFullYear() - 1; return new Date(y, 10, 1); }
+function recentLimitDays() {
+  if (state.recentWindow === 'month') return 31;
+  if (state.recentWindow === 'season') return (Date.now() - seasonStart()) / 864e5;
+  return 7;
+}
 function daysAgo(dateStr) { const t = Date.parse(dateStr); return isNaN(t) ? Infinity : (Date.now() - t) / 864e5; }
 function fmtDate(s) { const d = new Date(s); return isNaN(d) ? esc(s) : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); }
 function fmtAgo(s) { const h = (Date.now() - Date.parse(s)) / 36e5; if (!isFinite(h)) return ''; if (h < 1) return 'just now'; if (h < 36) return Math.round(h) + ' h ago'; return Math.round(h / 24) + ' days ago'; }
@@ -385,8 +393,8 @@ function renderPins() {
     let cls = t.level;
     if (p.kind === 'recent' && p.source !== 'demo') {
       const age = daysAgo(p.date);
-      if (age > state.recentDays) return;
-      if (age > 3) cls += ' old';
+      if (age > recentLimitDays()) return;
+      if (age > 7) cls += ' old';
     }
     const m = L.marker([p.lat, p.lon], { icon: pinIcon(p.kind, cls), keyboard: true, title: p.kind === 'recent' ? 'Recent avalanche' : 'Known slide path', zIndexOffset: p.kind === 'recent' ? 600 : 500 });
     m.on('click', () => openPin(p.id));
@@ -741,8 +749,8 @@ function showBrief() {
   }
   // Riders' pins in this area
   const mine = state.pins.filter(p => p.area === a.id);
-  const recent = mine.filter(p => p.kind === 'recent' && daysAgo(p.date) <= state.recentDays);
-  h += '<div class="card"><p class="eyebrow" style="margin:0">Rider reports, ' + esc(a.name) + '</p><span>' + recent.length + ' recent slide' + (recent.length === 1 ? '' : 's') + ' in the last ' + state.recentDays + ' days · ' + mine.filter(p => p.kind === 'path').length + ' slide paths added by riders</span></div>';
+  const recent = mine.filter(p => p.kind === 'recent' && daysAgo(p.date) <= recentLimitDays());
+  h += '<div class="card"><p class="eyebrow" style="margin:0">Rider reports, ' + esc(a.name) + '</p><span>' + recent.length + ' recent slide' + (recent.length === 1 ? '' : 's') + ' ' + WINDOW_LABEL[state.recentWindow] + ' · ' + mine.filter(p => p.kind === 'path').length + ' slide paths added by riders</span></div>';
 
   const unplaced = state.slides.filter(s => s.area === a.id && s.lat == null && !state.geo[s.id] && !state.placed[s.id]);
   if (unplaced.length) {
@@ -1237,7 +1245,7 @@ function showSettings() {
   h += '<div class="stack"><p class="eyebrow">Latest satellite (Sentinel-2)</p><p class="small muted" style="margin:0">Free from the EU Copernicus programme. New passes every few days; the app picks the newest clear one. One-off setup, about 5 minutes:</p>' +
     '<ol class="small" style="margin:0;padding-left:20px;display:grid;gap:4px"><li>Make a free account at <a href="https://dataspace.copernicus.eu/" target="_blank" rel="noopener">dataspace.copernicus.eu</a>.</li><li>Open the Sentinel Hub dashboard from your account, then <b>Configuration Utility</b>.</li><li>Copy the ID of the <b>Simple WMS</b> instance (or create one from the Simple WMS template).</li><li>Paste it here.</li></ol>' +
     '<div class="field"><label for="s-sat">Copernicus instance ID</label><input type="text" id="s-sat" autocomplete="off" spellcheck="false" value="' + esc(satId()) + '" placeholder="e.g. 1a2b3c4d-…"></div><button class="btn" id="sSat">Save and show satellite</button></div>';
-  h += '<div class="field"><span class="lbl">Show red skulls for slides in the last</span>' + chips('days', ['3', '7', '14', '30'], String(state.recentDays)) + '<span class="help">Days. Older reports hide automatically.</span></div>';
+  h += '<div class="field"><span class="lbl">Show red skulls for slides from</span><div class="seg" id="winSeg">' + [['week', 'This week'], ['month', 'This month'], ['season', 'This season']].map(([v, l]) => '<button type="button" data-v="' + v + '" class="' + (state.recentWindow === v ? 'on' : '') + '">' + l + '</button>').join('') + '</div><span class="help">Season counts from 1 November. Slides older than a week show faded.</span></div>';
   h += '<div class="stack"><p class="eyebrow">Elevation bands for ' + esc(a.name) + '</p><p class="small muted" style="margin:0">' + (a.bandsSource === 'JAN' ? 'Set from JAN\'s guide.' : 'These are estimates. If JAN or a local guide gives different heights, change them; the danger shading uses them.') + '</p><div class="grid3"><div class="field"><label for="s-alp">Alpine from (m)</label><input type="number" id="s-alp" value="' + bands.alpMin + '"></div><div class="field"><label for="s-tl">Treeline from (m)</label><input type="number" id="s-tl" value="' + bands.tlMin + '"></div><div class="field"><span class="lbl">&nbsp;</span><button class="btn" id="sBands">Save</button></div></div>' + (state.bandOverrides[a.id] ? '<button class="btn small ghost" id="sBandsReset">Reset to default</button>' : '') + '</div>';
   h += '<div class="stack"><p class="eyebrow">About · version ' + APP_VERSION + '</p><p class="small muted" style="margin:0">Topo and elevation: Geospatial Information Authority of Japan (GSI). Onsens, parking and other places: © OpenStreetMap contributors. Avalanche bulletins and incident records: Japan Avalanche Network (nadare.jp), summarised. This app helps you plan. It does not replace avalanche training, a beacon, shovel and probe, or your own judgement on the day.</p></div>';
   openSheet('Settings', h, { view: 'settings', tall: true });
@@ -1252,7 +1260,7 @@ function showSettings() {
   $('#sExport').onclick = exportPins;
   $('#sImport').onclick = () => $('#importFile').click();
   wireChips();
-  $('#sheetBody [data-chips="days"]').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; state.recentDays = Number(b.dataset.v); store.set('recentDays', state.recentDays); renderPins(); });
+  $('#winSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; state.recentWindow = b.dataset.v; store.set('recentWindow', state.recentWindow); $('#winSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); renderPins(); toast('Red skulls: ' + WINDOW_LABEL[state.recentWindow], 1400); });
   $('#sBands').onclick = () => {
     const alp = Number($('#s-alp').value), tl = Number($('#s-tl').value);
     if (!(alp > tl && tl > 0)) { toast('Alpine has to start higher than treeline'); return; }
