@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.7';
+const APP_VERSION = '2026-10-15.8';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -544,7 +544,8 @@ function labelCategory(t) {
 const JA_WORDS = [['スキー場', 'ski area'], ['温泉', 'onsen'], ['尾根', 'ridge'], ['乗越', 'col'], ['峠', 'pass'], ['岳', 'peak'], ['峰', 'peak'], ['山', 'mountain'], ['沢', 'gully / creek'], ['谷', 'valley'], ['川', 'river'], ['池', 'pond'], ['湖', 'lake'], ['滝', 'waterfall'], ['平', 'flat'], ['原', 'plateau'], ['台', 'plateau'], ['頭', 'top / knoll']];
 const LABEL_TYPE = { resort: 'Ski resort', peak: 'Peak', saddle: 'Pass / col', ridge: 'Ridge', valley: 'Valley', water: 'Lake / pond', place: 'Village', station: 'Station', sight: 'Viewpoint' };
 function englishFor(l) {
-  if (l.en) return l.en;
+  if (l.en) return l.c === 'station' && !/station|eki$/i.test(l.en) ? l.en + ' Station' : l.en;
+  if (l.romaji && /(Station|Ski Area|Ski Resort|Onsen|Village|Town|City)$/.test(l.romaji)) return l.romaji;
   const w = JA_WORDS.find(([k]) => (l.ja || '').endsWith(k));
   if (l.romaji) return l.romaji + (w ? ' (' + w[1] + ')' : l.c === 'station' ? ' Station' : '');
   return w ? w[1].charAt(0).toUpperCase() + w[1].slice(1) : (LABEL_TYPE[l.c] || '');
@@ -587,7 +588,7 @@ async function renderPois() {
   if (z < 12) return;
   pois.forEach(p => {
     if (!state.show[POI_SHOW[p.c]]) return;
-    if (p.c === 'parking' && z < 14) return;
+    if ((p.c === 'parking' || p.c === 'lift') && z < 15) return;
     if (!vb.contains([p.lat, p.lon])) return;
     const m = L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', iconSize: [24, 24], iconAnchor: [12, 12], html: '<div class="poi ' + p.c + '">' + POI_GLYPH[p.c] + '</div>' }) });
     const en = p.en || p.romaji || '', ja = p.ja != null ? p.ja : p.name;
