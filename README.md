@@ -25,6 +25,7 @@ Backcountry avalanche map for Japan. Built-in areas: Hakuba, Myoko, Lotte Arai, 
 - **Verification and trust**: other riders confirm or dispute a pin. 1 confirmation = Confirmed, 3+ = Trusted, more disputes than confirmations = Disputed. You can't verify your own pin.
 - **Sharing**: pins live on the phone. Settings → Share my pins sends a file; your mate imports it, verifies, and sends theirs back. Imports merge and never duplicate.
 - **Handy places** from OpenStreetMap: onsens (♨), parking, huts, lift stations, konbini, hospitals, koban.
+- **Route checks**: planned routes glow amber/red/purple on steep climbs and descents, and ! flags mark 45°+ ground, red danger shading and hazard markers within 30 m. On a red or purple climb, **Suggest a gentler line** finds a lower-angle path (dotted green) from the elevation data; tap Use it or Keep mine. It only knows the slope, not cliffs, trees, creeks or snow, so check it with your own eyes.
 - **GPS readout**: your elevation, slope, aspect, band and that band's rating.
 
 ## Put it online (GitHub Pages, free)

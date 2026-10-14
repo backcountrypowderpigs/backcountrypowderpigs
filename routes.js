@@ -51,13 +51,13 @@
   async function analyseLine(pts) {
     const samples = []; let cum = 0;
     for (let i = 0; i < pts.length; i++) {
-      if (i === 0) { samples.push({ lat: pts[0][0], lon: pts[0][1], d: 0 }); continue; }
+      if (i === 0) { samples.push({ lat: pts[0][0], lon: pts[0][1], d: 0, seg: 0 }); continue; }
       const a = pts[i - 1], b = pts[i], seg = hav(a, b), n = Math.max(1, Math.ceil(seg / 25));
-      for (let k = 1; k <= n; k++) samples.push({ lat: a[0] + (b[0] - a[0]) * k / n, lon: a[1] + (b[1] - a[1]) * k / n, d: cum + seg * k / n });
+      for (let k = 1; k <= n; k++) samples.push({ lat: a[0] + (b[0] - a[0]) * k / n, lon: a[1] + (b[1] - a[1]) * k / n, d: cum + seg * k / n, seg: i - 1 });
       cum += seg;
     }
     const terr = await Promise.all(samples.map(s => terrainAt(s.lat, s.lon).catch(() => null)));
-    samples.forEach((s, i) => { s.ele = terr[i] ? terr[i].elev : null; s.slope = terr[i] ? terr[i].slope : null; });
+    samples.forEach((s, i) => { s.ele = terr[i] ? terr[i].elev : null; s.slope = terr[i] ? terr[i].slope : null; s.asp = terr[i] && terr[i].aspect ? ASPECTS.indexOf(terr[i].aspect) * 45 : null; });
     const c = climb(samples.map(s => s.ele));
     // Munter: 1 unit = 1 km or 100 m up. Touring pace 4 units/h up, 10 units/h down/flat.
     let hours = 0;
@@ -79,11 +79,14 @@
         else { kind = 'down'; const gs = b.slope || 0; maxDown = Math.max(maxDown, gs); const c = GRADE.down.find(([t]) => gs >= t); cls = c ? c[1] : null; }
       }
       if (cls && run && run.cls === cls && run.kind === kind) { run.pts.push([+b.lat.toFixed(5), +b.lon.toFixed(5)]); run.d1 = Math.round(b.d); }
-      else if (cls) { run = { cls, kind, pts: [[+a.lat.toFixed(5), +a.lon.toFixed(5)], [+b.lat.toFixed(5), +b.lon.toFixed(5)]], d0: Math.round(a.d), d1: Math.round(b.d) }; segs.push(run); }
+      else if (cls) { run = { cls, kind, i0: i - 1, pts: [[+a.lat.toFixed(5), +a.lon.toFixed(5)], [+b.lat.toFixed(5), +b.lon.toFixed(5)]], d0: Math.round(a.d), d1: Math.round(b.d) }; segs.push(run); }
+      if (run) run.i1 = i;
       else run = null;
     }
     return {
-      maxUp: Math.round(maxUp), maxDown: Math.round(maxDown), upSteepM: Math.round(upSteepM), segs,
+      maxUp: Math.round(maxUp), maxDown: Math.round(maxDown), upSteepM: Math.round(upSteepM),
+      segs: segs.map(({ i0, i1, ...rest }) => rest), flags: lineFlags(samples), _samples: samples,
+      _upRuns: segs.filter(x => x.kind === 'up' && (x.cls === 'vsteep' || x.cls === 'boot')).map(x => ({ i0: x.i0, i1: x.i1 })),
       dist: cum, gain: c.gain, loss: c.loss, est: hours * 3600,
       maxSlope: sl.length ? Math.max(...sl.map(s => s.slope)) : null,
       steepPct: sl.length ? Math.round(100 * steep / sl.length) : null,
@@ -91,6 +94,7 @@
       profile: samples.filter((s, i) => i % Math.max(1, Math.floor(samples.length / 160)) === 0 || i === samples.length - 1).map(s => [Math.round(s.d), s.ele]),
     };
   }
+  const lean = s => { const o = Object.assign({}, s); delete o._samples; delete o._upRuns; return o; };
   function trackStats(pts) {
     let dist = 0, moving = 0;
     for (let i = 1; i < pts.length; i++) {
@@ -104,6 +108,124 @@
     const prof = pts.map((p, i) => { if (i) cum += hav(pts[i - 1], p); return [Math.round(cum), p[2]]; });
     const step = Math.max(1, Math.floor(prof.length / 160));
     return { dist, gain: c.gain, loss: c.loss, time, moving, profile: prof.filter((p, i) => i % step === 0 || i === prof.length - 1) };
+  }
+
+  /* ---------- "looks impassable" checks ---------- */
+  const BLOCK_HZ = ['cliff', 'noentry', 'water'];
+  const WARN_HZ = ['cliff', 'noentry', 'water', 'rocks', 'cornice', 'debris', 'treewell', 'ice', 'other'];
+  function dangerCtx() {
+    try { return state.area && hasRatings(bulletinFor(state.area.id)) ? shadeContext() : null; } catch (e) { return null; }
+  }
+  function lineFlags(samples) {
+    const flags = []; const dctx = dangerCtx();
+    const hz = state.pins.filter(p => p.kind === 'hazard' && WARN_HZ.includes(p.htype));
+    let inCliff = false, inRed = false; const seenHz = new Set();
+    samples.forEach(s => {
+      const cliff = s.slope != null && s.slope >= 45;
+      if (cliff && !inCliff) flags.push({ t: 'cliff', lat: s.lat, lon: s.lon, v: s.slope });
+      inCliff = cliff;
+      const red = !!(dctx && s.slope != null && s.asp != null && s.ele != null && dangerClass(s.slope, s.asp, s.ele, dctx) === DANGER_RED);
+      if (red && !inRed) flags.push({ t: 'danger', lat: s.lat, lon: s.lon });
+      inRed = red;
+      hz.forEach(p => { if (!seenHz.has(p.id) && hav([s.lat, s.lon], [p.lat, p.lon]) <= 30) { seenHz.add(p.id); flags.push({ t: 'hazard', lat: p.lat, lon: p.lon, h: p.htype }); } });
+    });
+    return flags.map(f => Object.assign(f, { lat: +f.lat.toFixed(5), lon: +f.lon.toFixed(5) }));
+  }
+  const FLAG_COL = { cliff: '#4c1d95', danger: '#dc2626', hazard: '#d97706' };
+  function flagText(f) {
+    if (f.t === 'cliff') return 'Over 45° here (' + f.v + '°): likely cliff or rock. Probably not passable.';
+    if (f.t === 'danger') return 'Crosses red danger shading for today.';
+    return 'Passes within 30 m of a marker: ' + hazardOf(f.h).label + '.';
+  }
+  function drawFlags(flags, layer) {
+    (flags || []).forEach(f => {
+      const m = L.marker([f.lat, f.lon], { zIndexOffset: 700, icon: L.divIcon({ className: '', iconSize: [22, 22], iconAnchor: [11, 11], html: '<div class="route-flag" style="background:' + FLAG_COL[f.t] + '">!</div>' }) });
+      m.bindPopup('<b>Check this spot</b><br><span class="small">' + esc(flagText(f)) + '</span>');
+      layer.addLayer(m);
+    });
+  }
+
+  /* ---------- "Suggest a gentler line": least-cost search over the elevation grid ----------
+     10 m grid around the steep section. Cost per metre rises with the uphill grade (a good skin track
+     is ~10-15°), with 30°+ ground (avalanche terrain) and today's red shading, and the search can't go
+     onto 45°+ ground or near cliff / no-entry / open-water markers. 16 move directions allow
+     switchbacks at sensible angles. Elevation data only: it can't see trees, bamboo, creeks or today's snow. */
+  function simplify(pts, tolM) {
+    if (pts.length < 3) return pts;
+    const lat0 = pts[0][0], ky = 111320, kx = 111320 * Math.cos(lat0 * Math.PI / 180);
+    const xy = pts.map(p => [p[1] * kx, p[0] * ky]);
+    const keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
+    (function dp(a, b) {
+      let best = -1, bi = -1; const [x1, y1] = xy[a], [x2, y2] = xy[b], L2 = (x2 - x1) ** 2 + (y2 - y1) ** 2 || 1;
+      for (let i = a + 1; i < b; i++) {
+        const t = Math.max(0, Math.min(1, ((xy[i][0] - x1) * (x2 - x1) + (xy[i][1] - y1) * (y2 - y1)) / L2));
+        const d = Math.hypot(xy[i][0] - (x1 + t * (x2 - x1)), xy[i][1] - (y1 + t * (y2 - y1)));
+        if (d > best) { best = d; bi = i; }
+      }
+      if (best > tolM) { keep[bi] = 1; dp(a, bi); dp(bi, b); }
+    })(0, pts.length - 1);
+    return pts.filter((p, i) => keep[i]);
+  }
+  async function suggestBetween(A, B) {
+    const lat0 = (A[0] + B[0]) / 2, ky = 111320, kx = 111320 * Math.cos(lat0 * Math.PI / 180), pad = 300, cell = 10;
+    const minLat = Math.min(A[0], B[0]) - pad / ky, maxLat = Math.max(A[0], B[0]) + pad / ky;
+    const minLon = Math.min(A[1], B[1]) - pad / kx, maxLon = Math.max(A[1], B[1]) + pad / kx;
+    const W = Math.ceil((maxLon - minLon) * kx / cell) + 1, H = Math.ceil((maxLat - minLat) * ky / cell) + 1;
+    if (W * H > 450000) return { err: 'That stretch is too long to work out. Try a shorter section.' };
+    const z = 14, tiles = {};
+    for (let tx = lon2x(minLon, z); tx <= lon2x(maxLon, z); tx++) for (let ty = lat2y(maxLat, z); ty <= lat2y(minLat, z); ty++) tiles[tx + '/' + ty] = await getDem(z, tx, ty);
+    const n = 256 * 2 ** z;
+    const elevAt = (lat, lon) => {
+      const gx = (lon + 180) / 360 * n, r = lat * Math.PI / 180, gy = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n;
+      const t = tiles[Math.floor(gx / 256) + '/' + Math.floor(gy / 256)]; return t ? t[Math.floor(gy % 256) * 256 + Math.floor(gx % 256)] : NaN;
+    };
+    const latOf = j => minLat + j * cell / ky, lonOf = i => minLon + i * cell / kx;
+    const E = new Float32Array(W * H);
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) E[j * W + i] = elevAt(latOf(j), lonOf(i));
+    const dctx = dangerCtx();
+    const blockHz = state.pins.filter(p => p.kind === 'hazard' && BLOCK_HZ.includes(p.htype));
+    const SL = new Float32Array(W * H), BAD = new Uint8Array(W * H), RED = new Uint8Array(W * H);
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      const k = j * W + i, e = E[k];
+      if (isNaN(e)) { BAD[k] = 1; continue; }
+      const ex = (E[j * W + Math.min(W - 1, i + 1)] - E[j * W + Math.max(0, i - 1)]) / (2 * cell);
+      const ey = (E[Math.min(H - 1, j + 1) * W + i] - E[Math.max(0, j - 1) * W + i]) / (2 * cell);
+      const s = Math.atan(Math.hypot(ex, ey)) * 180 / Math.PI; SL[k] = s;
+      if (!(s < 45)) BAD[k] = 1;
+      if (dctx && s >= 25) { const asp = (Math.atan2(-ex, -ey) * 180 / Math.PI + 360) % 360; if (dangerClass(s, asp, e, dctx) === DANGER_RED) RED[k] = 1; }
+    }
+    blockHz.forEach(p => {
+      const ci = Math.round((p.lon - minLon) * kx / cell), cj = Math.round((p.lat - minLat) * ky / cell);
+      for (let dj = -3; dj <= 3; dj++) for (let di = -3; di <= 3; di++) { const i = ci + di, j = cj + dj; if (i >= 0 && j >= 0 && i < W && j < H && Math.hypot(di, dj) <= 3) BAD[j * W + i] = 1; }
+    });
+    const idx = p => Math.max(0, Math.min(H - 1, Math.round((p[0] - minLat) * ky / cell))) * W + Math.max(0, Math.min(W - 1, Math.round((p[1] - minLon) * kx / cell)));
+    const start = idx(A), goal = idx(B); BAD[start] = 0; BAD[goal] = 0;
+    const gi = goal % W, gj = (goal / W) | 0;
+    const MOVES = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1], [1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]];
+    const g = new Float64Array(W * H).fill(Infinity), from = new Int32Array(W * H).fill(-1), closed = new Uint8Array(W * H);
+    const heap = []; const push = (k, f) => { heap.push([f, k]); let c = heap.length - 1; while (c) { const p = (c - 1) >> 1; if (heap[p][0] <= heap[c][0]) break; [heap[p], heap[c]] = [heap[c], heap[p]]; c = p; } };
+    const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let c = 0; for (;;) { const l = 2 * c + 1, r = l + 1; let m = c; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === c) break; [heap[m], heap[c]] = [heap[c], heap[m]]; c = m; } } return top; };
+    g[start] = 0; push(start, 0); let steps = 0;
+    while (heap.length) {
+      const [, k] = pop(); if (closed[k]) continue; closed[k] = 1;
+      if (k === goal) break;
+      if (++steps > 600000) break;
+      const ci = k % W, cj = (k / W) | 0;
+      for (const [di, dj] of MOVES) {
+        const i = ci + di, j = cj + dj; if (i < 0 || j < 0 || i >= W || j >= H) continue;
+        const nk = j * W + i; if (BAD[nk] || closed[nk]) continue;
+        const h = Math.hypot(di, dj) * cell, dz = E[nk] - E[k], grade = Math.atan2(Math.abs(dz), h) * 180 / Math.PI;
+        let f = dz > 0 ? (grade <= 12 ? 1 : grade <= 18 ? 1.4 : grade <= 22 ? 2.8 : grade <= 27 ? 8 : 40) : (grade > 30 ? 3 : 1);
+        if (SL[nk] >= 30) f += 1.5;
+        if (RED[nk]) f += 15;
+        const ng = g[k] + h * f;
+        if (ng < g[nk]) { g[nk] = ng; from[nk] = k; push(nk, ng + Math.hypot(i - gi, j - gj) * cell); }
+      }
+    }
+    if (from[goal] < 0 && goal !== start) return { err: 'Couldn\'t find a gentler way through here: the ground is too steep or blocked. Look for a different approach.' };
+    const path = []; for (let k = goal; k !== -1; k = from[k]) path.push([+latOf((k / W) | 0).toFixed(6), +lonOf(k % W).toFixed(6)]);
+    path.reverse(); path[0] = [A[0], A[1]]; path[path.length - 1] = [B[0], B[1]];
+    return { pts: simplify(path, 6) };
   }
 
   /* ---------- drawing ---------- */
@@ -121,7 +243,7 @@
     routeLayer.clearLayers();
     routes.filter(r => visible.has(r.id)).forEach(r => {
       const ll = r.pts.map(p => [p[0], p[1]]); if (ll.length < 2) return;
-      if (r.type === 'plan') glow(r.stats && r.stats.segs, routeLayer);
+      if (r.type === 'plan') { glow(r.stats && r.stats.segs, routeLayer); drawFlags(r.stats && r.stats.flags, routeLayer); }
       const parts = cased(ll, r.type === 'plan' ? PLAN_COL : TRACK_COL, r.type === 'plan', 4, 0.9);
       parts[2].on('click', () => openRoute(r.id));
       parts.forEach(p => routeLayer.addLayer(p));
@@ -155,6 +277,10 @@
       if (s.maxUp >= 30) warn.push('Some of the climb is 30°+: plan to boot-pack, or add switchbacks to ease it.');
       else if (s.maxUp >= 25) warn.push('Climb reaches 25–30°: kick turns, and ski crampons if it\'s firm.');
       if (s.maxDown >= 40) warn.push('Descent crosses 40°+ ground: no-fall terrain likely.');
+      const fl = s.flags || [], nC = fl.filter(f => f.t === 'cliff').length, nD = fl.filter(f => f.t === 'danger').length, hzs = [...new Set(fl.filter(f => f.t === 'hazard').map(f => hazardOf(f.h).label))];
+      if (nC) warn.push('Crosses 45°+ ground in ' + nC + ' place' + (nC > 1 ? 's' : '') + ': likely cliffs or rock, probably not passable (purple ! on the map).');
+      if (nD) warn.push('Crosses today\'s red danger shading in ' + nD + ' place' + (nD > 1 ? 's' : '') + ' (red ! on the map).');
+      if (hzs.length) warn.push('Passes within 30 m of: ' + hzs.join(', ') + ' (amber ! on the map).');
       h += '<div class="grade-box"><div><span class="k">Skinning</span> steepest <b>' + s.maxUp + '°</b>' + (s.upSteepM ? ' · ' + fmtKm(s.upSteepM) + ' over 20°' : '') + '</div>' +
         '<div><span class="k">Riding</span> steepest ground <b>' + s.maxDown + '°</b></div>' +
         (s.maxSlope != null ? '<div><span class="k">Avalanche terrain</span> <b>' + s.steepPct + '%</b> of the line is on 30°+ ground</div>' : '') +
@@ -193,7 +319,7 @@
       liveLayer.addLayer(m);
     });
     bar.innerHTML = '<div class="route-bar-head"><b class="plan-dot">Planning</b><span id="planStats" class="small">' + (plan.pts.length < 2 ? 'Tap the map to add points. Drag a point to move it.' : 'Working it out…') + '</span></div>' +
-      '<div class="btn-row"><button class="btn small" id="pUndo"' + (plan.pts.length ? '' : ' disabled') + '>Undo</button><button class="btn small" id="pClear"' + (plan.pts.length ? '' : ' disabled') + '>Clear</button><button class="btn small ghost" id="pCancel">Cancel</button><button class="btn small primary" id="pSave"' + (plan.pts.length > 1 ? '' : ' disabled') + '>Save route</button></div>';
+      '<div id="planAssist"></div><div class="btn-row"><button class="btn small" id="pUndo"' + (plan.pts.length ? '' : ' disabled') + '>Undo</button><button class="btn small" id="pClear"' + (plan.pts.length ? '' : ' disabled') + '>Clear</button><button class="btn small ghost" id="pCancel">Cancel</button><button class="btn small primary" id="pSave"' + (plan.pts.length > 1 ? '' : ' disabled') + '>Save route</button></div>';
     bar.hidden = false;
     $('#pUndo').onclick = () => { plan.pts.pop(); renderPlan(); };
     $('#pClear').onclick = () => { plan.pts = []; renderPlan(); };
@@ -202,14 +328,48 @@
     clearTimeout(planTimer);
     if (plan.pts.length > 1) planTimer = setTimeout(async () => {
       const s = await analyseLine(plan.pts); if (!plan) return; plan.stats = s;
-      glow(s.segs, liveLayer);
+      glow(s.segs, liveLayer); drawFlags(s.flags, liveLayer);
+      const as = $('#planAssist');
+      if (as) as.innerHTML = s._upRuns.length ? '<button class="btn small assist" id="pSuggest">Suggest a gentler line for the steep climb' + (s._upRuns.length > 1 ? 's (' + s._upRuns.length + ')' : '') + '</button>' : '';
+      const sg = $('#pSuggest'); if (sg) sg.onclick = () => suggestForPlan(sg);
       const el = $('#planStats'); if (el) el.innerHTML = fmtKm(s.dist) + ' · ↑ ' + s.gain + ' m · ↓ ' + s.loss + ' m · ~' + fmtDur(s.est) +
         (s.hasEle ? ' · skin max <b class="g-' + (s.maxUp >= 30 ? 'boot' : s.maxUp >= 25 ? 'vsteep' : s.maxUp >= 20 ? 'steep' : 'ok') + '">' + s.maxUp + '°</b> · ride max <b class="g-' + (s.maxDown >= 45 ? 'boot' : s.maxDown >= 40 ? 'vsteep' : s.maxDown >= 35 ? 'steep' : 'ok') + '">' + s.maxDown + '°</b>' : '');
     }, 250);
   }
+  // Work out gentler lines for each very steep climb, show them dotted, and let the rider choose.
+  async function suggestForPlan(btn) {
+    const s = plan && plan.stats; if (!s || !s._samples) return;
+    btn.disabled = true; btn.textContent = 'Working out a gentler line…';
+    const S = s._samples;
+    // Merge runs that are close together, and give each a little room either side.
+    const runs = [];
+    s._upRuns.forEach(r => { const last = runs[runs.length - 1]; if (last && S[r.i0].d - S[last.i1].d < 100) last.i1 = r.i1; else runs.push({ i0: r.i0, i1: r.i1 }); });
+    const out = [];
+    for (const r of runs) {
+      const a = S[Math.max(0, r.i0 - 2)], b = S[Math.min(S.length - 1, r.i1 + 2)];
+      const res = await suggestBetween([a.lat, a.lon], [b.lat, b.lon]);
+      if (res.err) { toast(res.err, 4500); continue; }
+      out.push({ a, b, pts: res.pts });
+    }
+    if (!plan) return;
+    if (!out.length) { btn.disabled = false; btn.textContent = 'Suggest a gentler line'; return; }
+    // Build the full suggested route and measure it.
+    let pts = plan.pts.map(p => p.slice());
+    out.slice().sort((x, y) => y.a.seg - x.a.seg).forEach(o => {
+      pts = pts.slice(0, o.a.seg + 1).concat(o.pts, pts.slice(o.b.seg + 1));
+    });
+    const ns = await analyseLine(pts); if (!plan) return;
+    plan.suggestion = { pts };
+    out.forEach(o => cased(o.pts, '#16a34a', true, 4).forEach(l => liveLayer.addLayer(l)));
+    $('#planAssist').innerHTML = '<div class="assist-card"><b>Suggested line (dotted green)</b><span class="small">Skin max <b>' + ns.maxUp + '°</b> (yours ' + s.maxUp + '°) · ' + fmtKm(ns.dist) + ' (' + (ns.dist >= s.dist ? '+' : '−') + fmtKm(Math.abs(ns.dist - s.dist)) + ') · ~' + fmtDur(ns.est) + '</span>' +
+      '<span class="small muted">From elevation data only. It can\'t see trees, bamboo, creeks or today\'s snow. Check it on the map and on the day.</span>' +
+      '<div class="btn-row"><button class="btn small primary" id="pUseSug">Use it</button><button class="btn small" id="pKeepMine">Keep mine</button></div></div>';
+    $('#pUseSug').onclick = () => { plan.pts = plan.suggestion.pts; plan.suggestion = null; renderPlan(); toast('Suggested line applied. Drag points to fine-tune.'); };
+    $('#pKeepMine').onclick = () => { plan.suggestion = null; renderPlan(); };
+  }
   function endPlan() { map.off('click', onPlanClick); plan = null; liveLayer.clearLayers(); bar.hidden = true; document.body.classList.remove('planning'); }
   async function savePlan() {
-    const p = plan; const stats = p.stats || await analyseLine(p.pts);
+    const p = plan; const stats = lean(p.stats || await analyseLine(p.pts));
     let r = p.editId && routes.find(x => x.id === p.editId);
     if (r) { r.pts = p.pts; r.stats = stats; r.updated = new Date().toISOString(); }
     else { r = { id: 'r-' + uid(), type: 'plan', name: 'Route ' + new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + (state.area ? ' · ' + state.area.name : ''), created: new Date().toISOString(), area: state.area && state.area.id, pts: p.pts, stats }; routes.unshift(r); }
@@ -304,7 +464,7 @@
     const r = routes.find(x => x.id === id); if (!r) return;
     if (r.type === 'plan' && r.stats && r.stats.maxUp == null && !r._upgrading) {
       r._upgrading = true;
-      analyseLine(r.pts.map(p => [p[0], p[1]])).then(s => { r.stats = s; delete r._upgrading; save(); drawSaved(); if (state.view === 'route') openRoute(id); });
+      analyseLine(r.pts.map(p => [p[0], p[1]])).then(s => { r.stats = lean(s); delete r._upgrading; save(); drawSaved(); if (state.view === 'route') openRoute(id); });
     }
     visible.add(r.id); save(); drawSaved();
     try { map.fitBounds(L.latLngBounds(r.pts.map(p => [p[0], p[1]])), { padding: [40, 40], maxZoom: 15 }); } catch (e) { }
@@ -359,7 +519,7 @@
       if (type === 'track' && !pts.every(p => p[3])) type = 'plan';
       pts = pts.slice(0, 20000);
       const nm = (doc.getElementsByTagName('name')[0] || {}).textContent || file.name.replace(/\.gpx$/i, '');
-      const r = { id: 'r-' + uid(), type, name: String(nm).slice(0, 60), created: new Date().toISOString(), pts, stats: type === 'plan' ? await analyseLine(pts.map(p => [p[0], p[1]])) : trackStats(pts) };
+      const r = { id: 'r-' + uid(), type, name: String(nm).slice(0, 60), created: new Date().toISOString(), pts, stats: type === 'plan' ? lean(await analyseLine(pts.map(p => [p[0], p[1]]))) : trackStats(pts) };
       if (type === 'plan') r.pts = pts.map(p => [p[0], p[1]]);
       routes.unshift(r); visible.add(r.id); save(); drawSaved(); openRoute(r.id); toast('Imported ' + r.name);
     } catch (e) { toast('Couldn\'t read that GPX file'); }

@@ -344,3 +344,8 @@ body.recording .scale-hide, body.planning .leaflet-control-scale { visibility: h
 .grade-box .k { display: inline-block; min-width: 116px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; }
 .grade-warn { color: var(--warn); font-weight: 600; }
 .g-ok { color: inherit; } .g-steep { color: #d97706; } .g-vsteep { color: #dc2626; } .g-boot { color: #7c3aed; }
+.route-flag { width: 22px; height: 22px; border-radius: 50%; color: #fff; font-weight: 900; font-size: 14px; display: grid; place-items: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.btn.assist { width: 100%; border-color: #16a34a; color: #15803d; font-weight: 700; }
+.assist-card { display: grid; gap: 6px; border: 2px dashed #16a34a; border-radius: 12px; padding: 8px 10px; background: var(--surface-2); }
+#planAssist:empty { display: none; }
+.toast { pointer-events: none; }
