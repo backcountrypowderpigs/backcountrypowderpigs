@@ -2,12 +2,14 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.12';
+const APP_VERSION = '2026-10-15.13';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
   std: 'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
   dem: 'https://cyberjapandata.gsi.go.jp/xyz/dem_png/{z}/{x}/{y}.png',
+  dem5: 'https://cyberjapandata.gsi.go.jp/xyz/dem5a_png/{z}/{x}/{y}.png', // 5 m laser survey, zoom 15, most mountain areas
+  photo: 'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', // sharp aerial photo, summer, can be a few years old
 };
 const OVERPASS = 'https://overpass-api.de/api/interpreter';
 const GEOCODE = 'https://msearch.gsi.go.jp/address-search/AddressSearch?q=';
@@ -118,22 +120,26 @@ const demCtx = demCanvas.getContext('2d', { willReadFrequently: true });
 function getDem(z, x, y) {
   const key = z + '/' + x + '/' + y;
   if (demMem.has(key)) return demMem.get(key);
-  const p = fetch(tileUrl(GSI.dem, z, x, y), { mode: 'cors' })
+  const p = fetch(tileUrl(z === 15 ? GSI.dem5 : GSI.dem, z, x, y), { mode: 'cors' })
     .then(r => r.ok ? r.blob() : null)
     .then(b => b ? createImageBitmap(b) : null)
     .then(bmp => {
       if (!bmp) return null;
       demCtx.clearRect(0, 0, 256, 256); demCtx.drawImage(bmp, 0, 0);
       const px = demCtx.getImageData(0, 0, 256, 256).data; const out = new Float32Array(65536);
+      let gaps = 0;
       for (let i = 0; i < 65536; i++) {
         const v = px[i * 4] * 65536 + px[i * 4 + 1] * 256 + px[i * 4 + 2];
         out[i] = v === 8388608 ? NaN : (v < 8388608 ? v * 0.01 : (v - 16777216) * 0.01);
+        if (v === 8388608) gaps++;
       }
+      // A 5 m tile with big holes is worse than the complete 10 m one: let the caller fall back.
+      if (z === 15 && gaps > 65536 * 0.05) return null;
       return out;
     })
     .catch(() => null);
   demMem.set(key, p);
-  if (demMem.size > 80) demMem.delete(demMem.keys().next().value);
+  if (demMem.size > 120) demMem.delete(demMem.keys().next().value);
   return p;
 }
 function cell(d, i, j) { i = i < 0 ? 0 : i > 255 ? 255 : i; j = j < 0 ? 0 : j > 255 ? 255 : j; return d[j * 256 + i]; }
@@ -153,14 +159,17 @@ const aspectName = deg => ASPECTS[Math.round(deg / 45) % 8];
 const pxRes = (lat, z) => 40075016.686 * Math.cos(lat * Math.PI / 180) / (256 * 2 ** z);
 
 async function terrainAt(lat, lon) {
-  const z = 14, n = 256 * 2 ** z;
-  const gx = (lon + 180) / 360 * n;
-  const r = lat * Math.PI / 180; const gy = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n;
-  const tx = Math.floor(gx / 256), ty = Math.floor(gy / 256), i = Math.floor(gx % 256), j = Math.floor(gy % 256);
-  const d = await getDem(z, tx, ty); if (!d) return null;
-  const elev = d[j * 256 + i]; if (isNaN(elev)) return null;
-  const sa = slopeAspect(d, i, j, pxRes(lat, z));
-  return { elev: Math.round(elev), slope: sa ? Math.round(sa.slope) : null, aspect: sa ? aspectName(sa.aspect) : null };
+  for (const z of [15, 14]) { // 5 m survey first, 10 m everywhere else
+    const n = 256 * 2 ** z;
+    const gx = (lon + 180) / 360 * n;
+    const r = lat * Math.PI / 180; const gy = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n;
+    const tx = Math.floor(gx / 256), ty = Math.floor(gy / 256), i = Math.floor(gx % 256), j = Math.floor(gy % 256);
+    const d = await getDem(z, tx, ty); if (!d) continue;
+    const elev = d[j * 256 + i]; if (isNaN(elev)) continue;
+    const sa = slopeAspect(d, i, j, pxRes(lat, z));
+    return { elev: Math.round(elev), slope: sa ? Math.round(sa.slope) : null, aspect: sa ? aspectName(sa.aspect) : null, res: z === 15 ? 5 : 10 };
+  }
+  return null;
 }
 
 /* ------------------------------------------------------------------ danger rules
@@ -235,8 +244,12 @@ function aspectClassifier() {
 }
 async function paintTerrain(canvas, { x, y, z }, classify) {
   if (!classify || z < 12) return;
-  const dz = Math.min(z, 14), scale = 2 ** (z - dz), dx = Math.floor(x / scale), dy = Math.floor(y / scale);
-  const d = await getDem(dz, dx, dy); if (!d) return;
+  // Zoomed in: use the 5 m survey where it exists; otherwise the 10 m model.
+  let dz = Math.min(z, z >= 15 ? 15 : 14), d = null;
+  if (dz === 15) { d = await getDem(15, x >> (z - 15), y >> (z - 15)); if (!d) dz = 14; }
+  const scale = 2 ** (z - dz), dx = Math.floor(x / scale), dy = Math.floor(y / scale);
+  if (!d) d = await getDem(dz, dx, dy);
+  if (!d) return;
   const span = 256 / scale, offX = (x % scale) * span, offY = (y % scale) * span;
   const res = pxRes(tile2lat(dy + 0.5, dz), dz);
   const g = canvas.getContext('2d'); const img = g.createImageData(256, 256); const px = img.data;
@@ -252,13 +265,17 @@ async function paintTerrain(canvas, { x, y, z }, classify) {
 }
 
 /* ------------------------------------------------------------------ map */
-const map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 6, maxZoom: 17, tap: true });
+const map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 6, maxZoom: 20, tap: true });
 L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
 map.attributionControl.setPrefix(false);
 const ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">GSI Japan</a> · POIs © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · Avalanche info: <a href="https://nadare.jp" target="_blank" rel="noopener">JAN</a>';
-const topo = L.tileLayer(GSI.std, { maxZoom: 17, maxNativeZoom: 16, attribution: ATTR, crossOrigin: true });
-const shadeLayer = new TerrainLayer({ maxZoom: 17, opacity: 1, zIndex: 300, classifier: shadeClassifier });
-const aspectLayer = new TerrainLayer({ maxZoom: 17, opacity: 1, zIndex: 310, classifier: aspectClassifier });
+const topo = L.tileLayer(GSI.std, { maxZoom: 20, maxNativeZoom: 18, attribution: ATTR, crossOrigin: true });
+// Close-up imagery for satellite mode: Sentinel-2 is 10 m pixels and goes soft past zoom 14,
+// so from zoom 15 the sharp GSI aerial photo takes over (summer imagery, can be a few years old).
+const SAT_SWITCH_Z = 15;
+const closeUp = L.tileLayer(GSI.photo, { minZoom: SAT_SWITCH_Z, maxZoom: 20, maxNativeZoom: 18, attribution: ATTR + ' · aerial photo: GSI', crossOrigin: true, zIndex: 3 });
+const shadeLayer = new TerrainLayer({ maxZoom: 20, opacity: 1, zIndex: 300, classifier: shadeClassifier });
+const aspectLayer = new TerrainLayer({ maxZoom: 20, opacity: 1, zIndex: 310, classifier: aspectClassifier });
 function redrawShading() { shadeLayer.redraw(); aspectLayer.redraw(); }
 const poiLayer = L.layerGroup().addTo(map);
 const pinLayer = L.layerGroup().addTo(map);
@@ -302,7 +319,7 @@ function buildSatLayer() {
   if (sat.layer) map.removeLayer(sat.layer);
   const [from, to] = satRange();
   sat.layer = L.tileLayer.wms(SH + 'wms/' + encodeURIComponent(satId()), {
-    layers: sat.layerName, format: 'image/jpeg', uppercase: true, tileSize: 512, maxZoom: 17, zIndex: 2,
+    layers: sat.layerName, format: 'image/jpeg', uppercase: true, tileSize: 512, maxZoom: SAT_SWITCH_Z - 1, zIndex: 2,
     time: sat.date ? sat.date + '/' + sat.date : from + '/' + to, maxcc: sat.date ? 100 : 20, showlogo: false,
     attribution: 'Contains modified Copernicus Sentinel data ' + new Date().getFullYear(),
   }).addTo(map);
@@ -311,6 +328,7 @@ function buildSatLayer() {
 function updateSatFlag() {
   const f = $('#satFlag');
   if (state.base !== 'sat') { f.hidden = true; return; }
+  if (map.getZoom() >= SAT_SWITCH_Z && navigator.onLine) { f.textContent = 'Close-up: sharp aerial photo (summer, not current)'; f.hidden = false; return; }
   if (!satId()) { f.textContent = 'Satellite: tap to set up'; f.hidden = false; return; }
   const cur = sat.dates.find(x => x.d === sat.date);
   f.textContent = sat.err ? 'Satellite unavailable' : sat.date ? 'Satellite ' + fmtDate(sat.date) + (cur ? ' · ' + Math.round(cur.cc) + '% cloud' : '') : 'Satellite: latest clear, last 90 days';
@@ -329,6 +347,7 @@ async function ensureSat() {
 
 function setBase() {
   if (sat.layer && state.base !== 'sat') { map.removeLayer(sat.layer); sat.layer = null; }
+  if (state.base === 'sat') { if (!map.hasLayer(closeUp)) closeUp.addTo(map); } else if (map.hasLayer(closeUp)) map.removeLayer(closeUp);
   if (!map.hasLayer(topo)) topo.addTo(map);
   shadeLayer.addTo(map); aspectLayer.addTo(map);
   updateNativeZoom();
@@ -341,7 +360,7 @@ function drawOutline() {
 }
 function updateNativeZoom() {
   const p = state.area && state.packs[state.area.id];
-  const z = (!navigator.onLine && p) ? p.maxZ : 16;
+  const z = (!navigator.onLine && p) ? p.maxZ : 18;
   if (topo.options.maxNativeZoom !== z) { topo.options.maxNativeZoom = z; topo.redraw(); }
 }
 
@@ -644,6 +663,7 @@ async function downloadPack(area, maxZ, onProgress) {
   const jobs = [];
   for (let z = 10; z <= maxZ; z++) tilesFor(area.bounds, z).forEach(t => jobs.push(tileUrl(GSI.std, ...t)));
   for (let z = 12; z <= 14; z++) tilesFor(area.bounds, z).forEach(t => jobs.push(tileUrl(GSI.dem, ...t)));
+  if (maxZ >= 16) tilesFor(area.bounds, 15).forEach(t => jobs.push(tileUrl(GSI.dem5, ...t))); // sharper close-up shading offline
   let done = 0, bytes = 0, failed = 0; const total = jobs.length + 2;
   let i = 0;
   async function worker() {
@@ -690,6 +710,7 @@ async function deletePack(area) {
 function estimatePack(area, maxZ) {
   let n = 0; for (let z = 10; z <= maxZ; z++) n += tilesFor(area.bounds, z).length;
   let d = 0; for (let z = 12; z <= 14; z++) d += tilesFor(area.bounds, z).length;
+  if (maxZ >= 16) d += tilesFor(area.bounds, 15).length;
   return n * 18000 + d * 60000;
 }
 
@@ -1390,6 +1411,7 @@ $('#briefChip').addEventListener('click', showBrief);
 $('#layersBtn').addEventListener('click', showLayers);
 $('#packsBtn').addEventListener('click', showPacks);
 $('#settingsBtn').addEventListener('click', showSettings);
+map.on('zoomend', () => updateSatFlag());
 map.on('moveend', () => {
   if (!state.area) return;
   renderPois(); const c = map.getCenter();
