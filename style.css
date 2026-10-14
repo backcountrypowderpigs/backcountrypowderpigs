@@ -244,6 +244,8 @@ a { color: var(--accent); }
 .pin.old { opacity: .6; }
 .poi { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 800; color: #fff; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4); line-height: 1; }
 .poi.onsen { background: #c2410c; font-size: 15px; }
+.poi.wild { background: #0e7490; font-size: 15px; box-shadow: 0 0 0 2px #0e7490, 0 1px 3px rgba(0,0,0,.4); }
+.poi.tiny { display: inline-grid; width: 18px; height: 18px; font-size: 11px; vertical-align: -4px; border-width: 1px; }
 .poi.parking { background: #1d4ed8; }
 .poi.hut { background: #7c4a1e; }
 .poi.lift { background: #475569; }

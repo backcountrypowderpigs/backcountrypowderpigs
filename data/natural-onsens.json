@@ -1,0 +1,50 @@
+{
+  "note": "Natural / wild mountain onsens. Entries without lat/lon get their position from OpenStreetMap by name when the places Action runs (tools/build_places.py). Most are snowbound and closed in winter.",
+  "onsens": [
+    {
+      "id": "renge", "area": "hakuba", "find": "蓮華温泉",
+      "ja": "蓮華温泉 野天風呂", "en": "Renge Onsen outdoor pools",
+      "lat": 36.8103, "lon": 137.7986, "ele": 1475,
+      "season": "Lodge and pools open about mid-July to late October.",
+      "access": "The road in is closed outside summer, so the rest of the year it's a long tour in.",
+      "note": "Four rock pools on the slope above the lodge: Ogon-yu, Senki-no-yu, Yakushi-yu and Sangokuichi-no-yu. No changing rooms. About ¥500 for the outdoor pools only."
+    },
+    {
+      "id": "hakuba-yari", "area": "hakuba", "find": "鑓温泉",
+      "ja": "白馬鑓温泉", "en": "Hakuba Yari Onsen", "ele": 2100,
+      "season": "Early July to late September only.",
+      "access": "4 to 5 hours' hike up from Sarukura.",
+      "note": "Open-air pools at about 2,100 m beside the hut. The hut is taken down every autumn because the site sits in an avalanche path all winter."
+    },
+    {
+      "id": "tsubame-ogon", "area": "myoko", "find": "黄金の湯",
+      "ja": "燕温泉 黄金の湯", "en": "Tsubame Onsen Ogon-no-yu",
+      "lat": 36.9027, "lon": 138.1440,
+      "season": "About April to November. Closed in winter.",
+      "access": "Short walk from the top of Tsubame Onsen village.",
+      "note": "Free, sunrise to sunset, separate men's and women's pools. Closed Mondays and Friday mornings for cleaning. Bring gumboots during the snowmelt."
+    },
+    {
+      "id": "tsubame-kawara", "area": "myoko", "find": "河原の湯",
+      "ja": "燕温泉 河原の湯", "en": "Tsubame Onsen Kawara-no-yu",
+      "season": "About July to November, once the bridge is in. Closed in winter.",
+      "access": "About 15 minutes' walk up the gorge from the Myoko-san / Tsubame Onsen trailhead.",
+      "note": "Free, mixed, beside the river. Sunrise to sunset."
+    },
+    {
+      "id": "nakadake", "area": "asahidake", "find": "中岳温泉",
+      "ja": "中岳温泉", "en": "Nakadake Onsen (wild)",
+      "lat": 43.68149, "lon": 142.86094,
+      "season": "Snow-free months only.",
+      "access": "About 2 hours from the top of the Asahidake ropeway via Susoaidaira.",
+      "note": "A true wild bath: a dug pool with no buildings. The source is too hot, so people dig channels to mix in snowmelt. Brown bear country, so carry a bear bell."
+    },
+    {
+      "id": "akayu", "area": "kagura", "find": "赤湯",
+      "ja": "赤湯温泉 山口館", "en": "Akayu Onsen",
+      "season": "Closed November to April. Usually reopens just before Golden Week.",
+      "access": "About 2 hours' hike from the end of the Akayu forest road beyond Naeba.",
+      "note": "Three river-side outdoor pools at a lamp-lit hut. You can dig your own pool on the riverbank upstream. No phone signal in the valley."
+    }
+  ]
+}

@@ -24,7 +24,8 @@ Backcountry avalanche map for Japan. Built-in areas: Hakuba, Myoko, Lotte Arai, 
 - **Rider reports** use the standard observation fields: size 1–5, avalanche type, trigger, aspect, elevation, slope, crown depth, width, run length, bed surface, involvement, injuries, and how the reporter knows. Elevation, slope and aspect auto-fill from the elevation data.
 - **Verification and trust**: other riders confirm or dispute a pin. 1 confirmation = Confirmed, 3+ = Trusted, more disputes than confirmations = Disputed. You can't verify your own pin.
 - **Sharing**: pins live on the phone. Settings → Share my pins sends a file; your mate imports it, verifies, and sends theirs back. Imports merge and never duplicate.
-- **Handy places** from OpenStreetMap: onsens (♨), parking, huts, lift stations, konbini, hospitals, koban.
+- **Natural mountain onsens** (teal ♨): wild and hike-in hot springs such as Renge, Hakuba Yari, Tsubame's Ogon-no-yu and Kawara-no-yu, Nakadake and Akayu, with season, access and notes. Listed in `data/natural-onsens.json` (add more there), plus any natural hot spring mapped on OpenStreetMap.
+- **Handy places** from OpenStreetMap: town onsens (orange ♨), parking, huts, lift stations, konbini, hospitals, koban.
 - **Route checks**: planned routes glow amber/red/purple on steep climbs and descents, and ! flags mark 45°+ ground, red danger shading and hazard markers within 30 m. On a red or purple climb, **Suggest a gentler line** finds a lower-angle path (dotted green) from the elevation data; tap Use it or Keep mine. It only knows the slope, not cliffs, trees, creeks or snow, so check it with your own eyes.
 - **GPS readout**: your elevation, slope, aspect, band and that band's rating.
 

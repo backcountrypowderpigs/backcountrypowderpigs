@@ -52,7 +52,17 @@ def label_category(t):
     return None
 
 
+def is_wild(t):
+    """A hot spring out in nature: mapped as natural=hot_spring with no bath house, hotel or building."""
+    nm = t.get('name', '')
+    if re.search(r'野湯|秘湯', nm):
+        return True
+    return (t.get('natural') == 'hot_spring' and not t.get('amenity') and not t.get('building') and not t.get('tourism')
+            and not t.get('opening_hours') and t.get('fee', 'no') != 'yes')
+
+
 def poi_category(t):
+    if is_wild(t): return 'wild'
     if t.get('natural') == 'hot_spring' or t.get('amenity') == 'public_bath' or t.get('bath:type') == 'onsen' or t.get('leisure') == 'onsen': return 'onsen'
     if t.get('amenity') == 'parking': return None if (t.get('access') == 'private' or t.get('parking') == 'underground') else 'parking'
     if t.get('tourism') in ('alpine_hut', 'wilderness_hut'): return 'hut'
@@ -75,7 +85,7 @@ def query(bounds):
     bb = f'{s},{w},{n},{e}'
     return ('[out:json][timeout:180];('
             f'nwr["natural"="hot_spring"]({bb});nwr["amenity"="public_bath"]({bb});nwr["bath:type"="onsen"]({bb});'
-            f'nwr["amenity"="parking"]({bb});nwr["tourism"~"^(alpine_hut|wilderness_hut)$"]({bb});'
+            f'nwr["name"~"野湯|秘湯"]({bb});nwr["amenity"="parking"]({bb});nwr["tourism"~"^(alpine_hut|wilderness_hut)$"]({bb});'
             f'node["aerialway"="station"]({bb});nwr["shop"="convenience"]({bb});'
             f'nwr["amenity"~"^(hospital|clinic|police)$"]({bb});'
             f'nwr["landuse"="winter_sports"]["name"]({bb});node["natural"~"^(peak|volcano|saddle)$"]["name"]({bb});'
@@ -121,6 +131,53 @@ def wikidata(items):
         x.pop('wd', None)
 
 
+def seeds_for(area_id):
+    try:
+        d = json.load(open(os.path.join(ROOT, 'data', 'natural-onsens.json'), encoding='utf-8'))
+        return [o for o in d.get('onsens', []) if o.get('area') == area_id]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def dist_m(a, b, c, d):
+    import math
+    x = (d - b) * 111320 * math.cos(math.radians((a + c) / 2)); y = (c - a) * 110540
+    return math.hypot(x, y)
+
+
+def place_seeds(area, points):
+    """Natural onsens from data/natural-onsens.json. Ones without a position are found on OpenStreetMap by name
+    (searching a little beyond the area box, since some sit just outside it)."""
+    seeds = seeds_for(area['id'])
+    need = [o for o in seeds if o.get('lat') is None and o.get('find')]
+    found = {}
+    if need:
+        s, w = area['bounds'][0]; n, e = area['bounds'][1]
+        bb = f'{s - .08},{w - .08},{n + .08},{e + .08}'
+        rx = '|'.join(re.escape(o['find']) for o in need)
+        try:
+            j = overpass(f'[out:json][timeout:60];nwr["name"~"{rx}"]({bb});out center tags;')
+            for el in j.get('elements', []):
+                nm = (el.get('tags') or {}).get('name', '')
+                lat = el.get('lat', (el.get('center') or {}).get('lat')); lon = el.get('lon', (el.get('center') or {}).get('lon'))
+                if lat is None: continue
+                for o in need:
+                    if o['find'] in nm and o['id'] not in found:
+                        found[o['id']] = (round(lat, 5), round(lon, 5))
+        except Exception as ex:  # noqa: BLE001
+            print(f"  natural onsen lookup failed: {ex}")
+    out = []
+    for o in seeds:
+        lat, lon = (o.get('lat'), o.get('lon')) if o.get('lat') is not None else found.get(o['id'], (None, None))
+        if lat is None:
+            print(f"  {o['id']}: not found on OpenStreetMap yet"); continue
+        out.append({'c': 'wild', 'id': o['id'], 'lat': lat, 'lon': lon, 'name': o.get('en') or o.get('ja'), 'ja': o.get('ja', ''), 'en': o.get('en', ''), 'romaji': '',
+                    'ele': o.get('ele'), 'season': o.get('season', ''), 'access': o.get('access', ''), 'note': o.get('note', ''), 'fee': '', 'hours': '', 'cap': ''})
+    # Drop OpenStreetMap onsen dots sitting on top of a listed natural onsen, so it isn't shown twice.
+    keep = [p for p in points if not (p['c'] in ('onsen', 'wild') and any(dist_m(p['lat'], p['lon'], q['lat'], q['lon']) < 300 for q in out))]
+    return keep + out
+
+
 def build(area):
     j = overpass(query(area['bounds']))
     points, lines, labels = [], [], []
@@ -155,6 +212,7 @@ def build(area):
         d = {'c': c, 'lat': lat, 'lon': lon, 'fee': t.get('fee', ''), 'hours': t.get('opening_hours', ''), 'cap': t.get('capacity', '')}
         d.update(names(t)); points.append(d)
     wikidata(points + lines + labels)
+    points = place_seeds(area, points)
     return {'v': 3, 'fetched': datetime.datetime.utcnow().replace(microsecond=0).isoformat() + 'Z', 'source': 'OpenStreetMap contributors, Wikidata',
             'points': points, 'lines': lines, 'labels': labels}
 

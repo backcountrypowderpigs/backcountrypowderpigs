@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.17';
+const APP_VERSION = '2026-10-15.18';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -50,7 +50,7 @@ const state = {
   customAreas: store.get('customAreas', []), boundsOverrides: store.get('boundsOverrides', {}),
   slides: [], pins: store.get('pins', []),
   shade: store.get('shade', 'danger'), base: store.get('base', 'sat') === 'topo' ? 'topo' : 'sat',
-  show: Object.assign({ recent: true, path: true, hazard: true, onsen: true, parking: true, hut: true, shop: true, lifts: true, labels: true }, store.get('show', {})),
+  show: Object.assign({ recent: true, path: true, hazard: true, onsen: true, wild: true, parking: true, hut: true, shop: true, lifts: true, labels: true }, store.get('show', {})),
   recentWindow: ['week', 'month', 'season'].includes(store.get('recentWindow', '')) ? store.get('recentWindow', '') : 'week',
   aspectSel: store.get('aspectSel', ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']), aspectMatch: store.get('aspectMatch', true),
   aspectOn: store.get('aspectOn', store.get('shade', '') === 'aspect'),
@@ -459,10 +459,16 @@ function renderPins() {
 function findPin(id) { return allPins().find(p => p.id === id); }
 
 /* ------------------------------------------------------------------ POIs (OpenStreetMap via Overpass) */
-const POI_GLYPH = { onsen: '♨', parking: 'P', hut: '▲', lift: '⇡', shop: '24', medical: '✚', police: '交' };
-const POI_LABEL = { onsen: 'Onsen / hot spring', parking: 'Parking', hut: 'Mountain hut', lift: 'Lift station', shop: 'Convenience store', medical: 'Hospital / clinic', police: 'Police box (koban)' };
-const POI_SHOW = { onsen: 'onsen', parking: 'parking', hut: 'hut', lift: 'hut', shop: 'shop', medical: 'shop', police: 'shop' };
+const POI_GLYPH = { wild: '♨', onsen: '♨', parking: 'P', hut: '▲', lift: '⇡', shop: '24', medical: '✚', police: '交' };
+const POI_LABEL = { wild: 'Natural mountain onsen', onsen: 'Onsen / hot spring', parking: 'Parking', hut: 'Mountain hut', lift: 'Lift station', shop: 'Convenience store', medical: 'Hospital / clinic', police: 'Police box (koban)' };
+const POI_SHOW = { wild: 'wild', onsen: 'onsen', parking: 'parking', hut: 'hut', lift: 'hut', shop: 'shop', medical: 'shop', police: 'shop' };
+// A hot spring out in nature: mapped as a natural hot spring with no bath house, hotel or building.
+function isWildOnsen(t) {
+  if (/野湯|秘湯/.test(t.name || '')) return true;
+  return t.natural === 'hot_spring' && !t.amenity && !t.building && !t.tourism && !t.opening_hours && (t.fee || 'no') !== 'yes';
+}
 function poiCategory(t) {
+  if (isWildOnsen(t)) return 'wild';
   if (t.natural === 'hot_spring' || t.amenity === 'public_bath' || t['bath:type'] === 'onsen' || t.leisure === 'onsen') return 'onsen';
   if (t.amenity === 'parking') return (t.access === 'private' || t.parking === 'underground') ? null : 'parking';
   if (t.tourism === 'alpine_hut' || t.tourism === 'wilderness_hut') return 'hut';
@@ -612,6 +618,15 @@ function nearestResort(labels, lat, lon) {
   return best;
 }
 const RUN_COL = { novice: '#1f9d55', easy: '#1f9d55', intermediate: '#d42a2a', advanced: '#111', expert: '#111', freeride: '#111' };
+// Listed natural onsens (data/natural-onsens.json) on top of the area's places; drops any plain onsen dot sitting on one.
+function withWildOnsens(points, areaId) {
+  const seeds = (state.wildSeeds || []).filter(o => o.area === areaId && o.lat != null)
+    .filter(o => !points.some(p => p.id === o.id))
+    .map(o => ({ c: 'wild', id: o.id, lat: o.lat, lon: o.lon, name: o.en || o.ja, ja: o.ja || '', en: o.en || '', ele: o.ele, season: o.season, access: o.access, note: o.note }));
+  if (!seeds.length) return points;
+  const near = p => seeds.some(q => map.distance([p.lat, p.lon], [q.lat, q.lon]) < 300);
+  return points.filter(p => !((p.c === 'onsen' || p.c === 'wild') && !p.id && near(p))).concat(seeds);
+}
 async function renderPois() {
   poiLayer.clearLayers();
   if (!state.area || map.getZoom() < 11) return;
@@ -619,7 +634,7 @@ async function renderPois() {
   let data;
   if (state._pois && state._pois.area === areaId) data = state._pois.data;
   else { data = await loadPois(state.area); state._pois = { area: areaId, data }; if (state.area.id !== areaId) return; poiLayer.clearLayers(); }
-  const pois = data.points || [];
+  const pois = withWildOnsens(data.points || [], areaId);
   const z = map.getZoom(); const vb = map.getBounds().pad(0.2);
   const labels = data.labels || [];
   if (state.show.labels) labels.forEach(l => {
@@ -650,6 +665,11 @@ async function renderPois() {
     const html = '<b>' + esc(en || ja || POI_LABEL[p.c]) + '</b>' + (en && ja && ja !== en ? '<br><span class="muted" lang="ja">' + esc(ja) + '</span>' : '') +
       '<br><span class="muted small">' + POI_LABEL[p.c] + (p.fee ? ' · fee: ' + esc(p.fee) : '') + (p.cap ? ' · ' + esc(p.cap) + ' spaces' : '') + '</span>' +
       (p.hours ? '<br><span class="small">Hours: ' + esc(p.hours) + '</span>' : '') +
+      (p.c === 'wild' ? (p.ele ? '<br><span class="small">About ' + esc(p.ele) + ' m</span>' : '') +
+        (p.season ? '<br><span class="small"><b>Season:</b> ' + esc(p.season) + '</span>' : '') +
+        (p.access ? '<br><span class="small"><b>Getting there:</b> ' + esc(p.access) + '</span>' : '') +
+        (p.note ? '<br><span class="small">' + esc(p.note) + '</span>' : '') +
+        '<br><span class="small muted">' + (p.id ? 'Most mountain onsens are snowbound and closed in winter.' : 'Mapped as a natural hot spring on OpenStreetMap. It may be too hot, dry or not bathable.') + ' Never bathe alone, and check the water temperature first.</span>' : '') +
       '<br><a class="small" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lon + '">Directions</a>';
     m.bindPopup(html);
     poiLayer.addLayer(m);
@@ -871,7 +891,7 @@ function showLayers() {
   if (eff === 'danger') h += '<div class="legend"><span><span class="sw" style="background:rgba(214,18,36,.6)"></span><b>Red: stay off.</b> Steep slopes the bulletin rates dangerous for their height and aspect.</span><span><span class="sw" style="background:rgba(247,148,30,.45)"></span><b>Amber: only with good reason</b>, one at a time, and a way out.</span><span class="muted">Ground below the shading (gullies, runouts) can still be hit by slides from above.</span></div>';
   else if (eff === 'slope') h += '<div class="legend"><span><span class="sw" style="background:rgb(250,225,0)"></span>27–29°</span><span><span class="sw" style="background:rgb(247,148,30)"></span>30–34°</span><span><span class="sw" style="background:rgb(226,32,40)"></span>35–39°</span><span><span class="sw" style="background:rgb(140,40,170)"></span>40–44°</span><span><span class="sw" style="background:rgb(40,30,50)"></span>45° and steeper</span><span class="muted">Most slab avalanches start on 30–45° slopes.</span></div>';
   h += aspectHtml;
-  h += '<div class="field"><span class="lbl">Show</span>' + tog('recent', 'Recent avalanches (black pins)') + tog('path', 'Known slide paths and incidents (red skulls)') + tog('hazard', 'Hazard and handy markers') + tog('onsen', '♨ Onsens') + tog('parking', 'Parking (zoom in to see)') + tog('labels', 'English place names and ski resorts') + tog('lifts', 'Lifts and ski runs') + tog('hut', 'Huts and lift stations') + tog('shop', 'Konbini, medical, koban') + '</div>';
+  h += '<div class="field"><span class="lbl">Show</span>' + tog('recent', 'Recent avalanches (black pins)') + tog('path', 'Known slide paths and incidents (red skulls)') + tog('hazard', 'Hazard and handy markers') + tog('wild', '♨ Natural mountain onsens') + tog('onsen', '♨ Onsens (town baths)') + tog('parking', 'Parking (zoom in to see)') + tog('labels', 'English place names and ski resorts') + tog('lifts', 'Lifts and ski runs') + tog('hut', 'Huts and lift stations') + tog('shop', 'Konbini, medical, koban') + '</div>';
   h += '<details class="glossary"><summary>Japanese map words</summary><p class="small muted">The topo map\'s own text is Japanese and can\'t be translated in place. These endings tell you what a name is.</p><dl class="kv small">' +
     [['岳 / 山 / 峰', 'dake / yama / mine: peak, mountain'], ['尾根', 'one: ridge'], ['沢', 'sawa: gully, creek'], ['谷', 'tani / dani: valley'], ['峠 / 乗越', 'tōge / nokkoshi: pass, col'], ['頭', 'atama / kashira: knoll, top'], ['平 / 原', 'taira / hara: flat, plateau'], ['池 / 湖', 'ike / ko: pond, lake'], ['滝', 'taki: waterfall'], ['川', 'kawa / gawa: river'], ['温泉', 'onsen: hot spring'], ['小屋', 'koya: hut'], ['登山口', 'tozanguchi: trailhead'], ['駐車場', 'chūshajō: parking'], ['スキー場', 'sukījō: ski area'], ['ゲート', 'gēto: backcountry gate'], ['雪崩', 'nadare: avalanche'], ['立入禁止', 'tachiiri kinshi: no entry']]
       .map(([j, e]) => '<dt lang="ja">' + j + '</dt><dd>' + e + '</dd>').join('') + '</dl></details>';
@@ -1393,6 +1413,7 @@ function showHelp() {
     '<span><span class="sw" style="background:rgba(247,148,30,.45)"></span><b>Amber shading:</b> only with good reason</span>' +
     '<span>' + SKULL.replace('width="34" height="34"', 'width="18" height="18" style="vertical-align:-4px;margin-right:6px"') + '<b>Red skull:</b> known slide path or past incident</span>' +
     '<span>' + PATH.replace('width="34" height="34"', 'width="18" height="18" style="vertical-align:-4px;margin-right:6px"') + '<b>Black pin:</b> recent avalanche</span>' +
+    '<span><span class="poi wild tiny">♨</span> <b>Teal ♨:</b> natural mountain onsen (orange ♨ = town bath)</span>' +
     '<span><span class="hz-pin tiny" style="background:#d97706">' + hazardSvg('rocks', 12) + '</span> <b>Markers:</b> amber hazard, red keep out, blue water, green good to know</span>' +
     '<span><span class="sw" style="background:repeating-linear-gradient(90deg,#ff2bd6 0 6px,transparent 6px 9px);border:0"></span><b>Dashed magenta:</b> planned route</span>' +
     '<span><span class="sw" style="background:#00b4ff;border:0"></span><b>Solid blue:</b> recorded track</span>' +
@@ -1426,6 +1447,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && na
 async function boot() {
   try {
     const [ar, sl] = await Promise.all([fetch('data/areas.json').then(r => r.json()), fetch('data/known-slides.json').then(r => r.json())]);
+    fetch('data/natural-onsens.json').then(r => r.json()).then(d => { state.wildSeeds = d.onsens || []; if (state._pois) renderPois(); }).catch(() => { });
     state.regions = ar.regions || {}; state.builtinAreas = ar.areas; state.slides = sl.slides; rebuildAreas();
   } catch (e) { toast('Couldn\'t load the app data. Open it once with signal.'); return; }
   state.area = state.areas.find(a => a.id === store.get('area', 'hakuba')) || state.areas[0];
