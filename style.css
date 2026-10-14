@@ -269,3 +269,7 @@ a { color: var(--accent); }
 .aspect-legend { display: grid; grid-template-columns: 80px 1fr; gap: 12px; align-items: center; }
 .glossary summary { cursor: pointer; font-weight: 600; min-height: 32px; }
 .glossary dt { font-weight: 700; color: var(--ink); }
+.map-label.lbl-station { color: #3a2c6b; }
+.map-label.lbl-station b::before { content: "▣ "; }
+.map-label.lbl-sight { color: #6b2c4a; font-size: 11px; }
+.map-label.lbl-sight b::before { content: "✦ "; }

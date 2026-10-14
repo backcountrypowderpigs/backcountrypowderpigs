@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.4';
+const APP_VERSION = '2026-10-15.5';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -420,8 +420,9 @@ async function fetchPlaces(area) {
     'node["aerialway"="station"](' + bb + ');nwr["shop"="convenience"](' + bb + ');' +
     'nwr["amenity"~"^(hospital|clinic|police)$"](' + bb + ');' +
     'nwr["landuse"="winter_sports"]["name"](' + bb + ');node["natural"~"^(peak|volcano|saddle)$"]["name"](' + bb + ');' +
-    'way["natural"~"^(ridge|valley)$"]["name"](' + bb + ');node["place"~"^(town|village|hamlet|locality)$"]["name"](' + bb + ');' +
-    'nwr["natural"="water"]["name"](' + bb + '););out center tags;' +
+    'way["natural"~"^(ridge|valley)$"]["name"](' + bb + ');node["place"~"^(city|town|village|suburb|neighbourhood|hamlet|locality)$"]["name"](' + bb + ');' +
+    'nwr["natural"="water"]["name"](' + bb + ');node["railway"="station"]["name"](' + bb + ');' +
+    'nwr["tourism"~"^(viewpoint|attraction)$"]["name"](' + bb + '););out center tags;' +
     '(way["aerialway"~"^(cable_car|gondola|mixed_lift|chair_lift|drag_lift|t-bar|j-bar|platter|rope_tow)$"](' + bb + ');' +
     'way["piste:type"="downhill"](' + bb + '););out geom tags;';
   const r = await fetch(OVERPASS, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
@@ -432,17 +433,18 @@ async function fetchPlaces(area) {
     const t = el.tags || {};
     if (el.geometry && (t.aerialway || t['piste:type'])) {
       const pts = el.geometry.map(g => [+g.lat.toFixed(5), +g.lon.toFixed(5)]);
-      if (pts.length > 1) lines.push({ c: t.aerialway ? 'lift' : 'run', kind: t.aerialway || '', name: t['name:en'] || t.name || t['piste:name'] || '', ja: t.name || '', diff: t['piste:difficulty'] || '', pts });
+      if (pts.length > 1) lines.push(Object.assign({ c: t.aerialway ? 'lift' : 'run', kind: t.aerialway || '', diff: t['piste:difficulty'] || '', pts }, namesOf(t)));
       return;
     }
     const lat = el.lat != null ? el.lat : el.center && el.center.lat, lon = el.lon != null ? el.lon : el.center && el.center.lon;
     if (lat == null) return;
     const lc = labelCategory(t);
-    if (lc) { labels.push({ c: lc, lat, lon, ja: t.name || '', en: t['name:en'] || t['name:ja-Latn'] || t['name:ja_rm'] || '', ele: parseInt(t.ele, 10) || null }); return; }
+    if (lc) { labels.push(Object.assign({ c: lc, lat, lon, ele: parseInt(t.ele, 10) || null }, namesOf(t))); return; }
     const c = poiCategory(t); if (!c) return;
-    points.push({ c, lat, lon, name: t.name || '', en: t['name:en'] || '', fee: t.fee || '', hours: t.opening_hours || '', cap: t.capacity || '' });
+    points.push(Object.assign({ c, lat, lon, fee: t.fee || '', hours: t.opening_hours || '', cap: t.capacity || '' }, namesOf(t)));
   });
-  return { v: 2, fetched: new Date().toISOString(), points, lines, labels };
+  await addWikidataNames(points.concat(lines, labels));
+  return { v: 3, fetched: new Date().toISOString(), points, lines, labels };
 }
 async function savePlaces(area, data) {
   const json = JSON.stringify(data);
@@ -456,7 +458,7 @@ async function loadPois(area) {
   if (!('caches' in window)) return empty;
   let data = null;
   try { const r = await caches.match('/pois/' + area.id); if (r) { const j = await r.json(); data = Array.isArray(j) ? { points: j, lines: [], labels: [] } : j; } } catch (e) { }
-  const stale = !data || !data.labels; // first visit, or saved before names/resorts existed
+  const stale = !data || (data.v || 0) < 3; // first visit, or saved before the English names were added
   if (stale && navigator.onLine) {
     try {
       placesInFlight[area.id] = placesInFlight[area.id] || (async () => {
@@ -469,7 +471,53 @@ async function loadPois(area) {
   }
   return data || empty;
 }
+/* ---------- English names ----------
+   1. name:en (or a romanised tag) from OpenStreetMap
+   2. the English label on Wikidata, for places that link to it (towns, big peaks, resorts, onsens)
+   3. the Japanese reading tag (hiragana / katakana) turned into romaji, e.g. からまつだけ -> Karamatsudake
+   The Japanese name is always kept and shown underneath. */
+const KANA = { あ:'a',い:'i',う:'u',え:'e',お:'o',か:'ka',き:'ki',く:'ku',け:'ke',こ:'ko',が:'ga',ぎ:'gi',ぐ:'gu',げ:'ge',ご:'go',さ:'sa',し:'shi',す:'su',せ:'se',そ:'so',ざ:'za',じ:'ji',ず:'zu',ぜ:'ze',ぞ:'zo',た:'ta',ち:'chi',つ:'tsu',て:'te',と:'to',だ:'da',ぢ:'ji',づ:'zu',で:'de',ど:'do',な:'na',に:'ni',ぬ:'nu',ね:'ne',の:'no',は:'ha',ひ:'hi',ふ:'fu',へ:'he',ほ:'ho',ば:'ba',び:'bi',ぶ:'bu',べ:'be',ぼ:'bo',ぱ:'pa',ぴ:'pi',ぷ:'pu',ぺ:'pe',ぽ:'po',ま:'ma',み:'mi',む:'mu',め:'me',も:'mo',や:'ya',ゆ:'yu',よ:'yo',ら:'ra',り:'ri',る:'ru',れ:'re',ろ:'ro',わ:'wa',ゐ:'i',ゑ:'e',を:'o',ん:'n',ぁ:'a',ぃ:'i',ぅ:'u',ぇ:'e',ぉ:'o',ゔ:'vu' };
+const YOON = { ゃ:'a',ゅ:'u',ょ:'o' };
+function kanaToRomaji(str) {
+  const s = (str || '').replace(/[\u30a1-\u30f6]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60)); // katakana -> hiragana
+  let out = '', dbl = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i], nx = s[i + 1];
+    if (c === 'っ') { dbl = true; continue; }
+    if (c === 'ー') continue;
+    let r = KANA[c];
+    if (r === undefined) { out += /[\s・]/.test(c) ? ' ' : (/[A-Za-z0-9-]/.test(c) ? c : ''); dbl = false; continue; }
+    if (nx && YOON[nx] && r.length > 1 && r.endsWith('i')) { const base = r.slice(0, -1); r = (/^(sh|ch|j)$/.test(base) ? base : base + 'y') + YOON[nx]; i++; }
+    if (dbl) { r = (r.startsWith('ch') ? 't' : r[0]) + r; dbl = false; }
+    if (c === 'ん' && nx && /[あいうえおやゆよ]/.test(nx)) r = "n'";
+    out += r;
+  }
+  // Long vowels written the way English maps do: Myoukou -> Myoko, Hokkaidou -> Hokkaido
+  out = out.replace(/ou/g, 'o').replace(/uu/g, 'u');
+  return out.trim().replace(/\s+/g, ' ').split(' ').map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(' ');
+}
+function namesOf(t) {
+  const ja = t.name || '';
+  const en = t['name:en'] || t['name:ja-Latn'] || t['name:ja_rm'] || '';
+  const reading = t['name:ja-Hira'] || t['name:ja_kana'] || t['name:ja-Kana'] || '';
+  return { name: en || ja, ja, en, romaji: !en && reading ? kanaToRomaji(reading) : '', wd: !en && /^Q\d+$/.test(t.wikidata || '') ? t.wikidata : '' };
+}
+async function addWikidataNames(items) {
+  const need = items.filter(x => x.wd && !x.en);
+  const ids = [...new Set(need.map(x => x.wd))].slice(0, 500);
+  const got = {};
+  for (let i = 0; i < ids.length; i += 50) {
+    try {
+      const r = await fetch('https://www.wikidata.org/w/api.php?action=wbgetentities&props=labels&languages=en&format=json&origin=*&ids=' + ids.slice(i, i + 50).join('|'));
+      const j = await r.json();
+      Object.entries(j.entities || {}).forEach(([id, e]) => { const l = e.labels && e.labels.en && e.labels.en.value; if (l) got[id] = l; });
+    } catch (e) { break; }
+  }
+  need.forEach(x => { if (got[x.wd]) { x.en = got[x.wd]; x.name = x.en; } });
+}
 function labelCategory(t) {
+  if (t.railway === 'station') return 'station';
+  if (t.tourism === 'viewpoint' || t.tourism === 'attraction') return 'sight';
   if (t.landuse === 'winter_sports') return 'resort';
   if (t.natural === 'peak' || t.natural === 'volcano') return 'peak';
   if (t.natural === 'saddle') return 'saddle';
@@ -481,13 +529,14 @@ function labelCategory(t) {
 }
 // When OpenStreetMap has no English name, say what the thing is from the Japanese ending.
 const JA_WORDS = [['スキー場', 'ski area'], ['温泉', 'onsen'], ['尾根', 'ridge'], ['乗越', 'col'], ['峠', 'pass'], ['岳', 'peak'], ['峰', 'peak'], ['山', 'mountain'], ['沢', 'gully / creek'], ['谷', 'valley'], ['川', 'river'], ['池', 'pond'], ['湖', 'lake'], ['滝', 'waterfall'], ['平', 'flat'], ['原', 'plateau'], ['台', 'plateau'], ['頭', 'top / knoll']];
-const LABEL_TYPE = { resort: 'Ski resort', peak: 'Peak', saddle: 'Pass / col', ridge: 'Ridge', valley: 'Valley', water: 'Lake / pond', place: 'Village' };
+const LABEL_TYPE = { resort: 'Ski resort', peak: 'Peak', saddle: 'Pass / col', ridge: 'Ridge', valley: 'Valley', water: 'Lake / pond', place: 'Village', station: 'Station', sight: 'Viewpoint' };
 function englishFor(l) {
   if (l.en) return l.en;
   const w = JA_WORDS.find(([k]) => (l.ja || '').endsWith(k));
-  return w ? w[1].charAt(0).toUpperCase() + w[1].slice(1) : LABEL_TYPE[l.c];
+  if (l.romaji) return l.romaji + (w ? ' (' + w[1] + ')' : l.c === 'station' ? ' Station' : '');
+  return w ? w[1].charAt(0).toUpperCase() + w[1].slice(1) : (LABEL_TYPE[l.c] || '');
 }
-const LABEL_MINZ = { resort: 11, peak: 12, place: 12, saddle: 13, ridge: 13, valley: 13, water: 13 };
+const LABEL_MINZ = { resort: 11, peak: 12, place: 12, station: 12, sight: 14, saddle: 13, ridge: 13, valley: 13, water: 13 };
 function nearestResort(labels, lat, lon) {
   let best = null, bd = 0.03;
   labels.forEach(l => { if (l.c !== 'resort') return; const d = Math.hypot(l.lat - lat, (l.lon - lon) * 0.8); if (d < bd) { bd = d; best = l; } });
@@ -518,7 +567,7 @@ async function renderPois() {
       : { renderer: lineRenderer, color: RUN_COL[l.diff] || '#6b7a89', weight: 3, opacity: .7, dashArray: l.diff ? null : '4 4' });
     const mid = l.pts[Math.floor(l.pts.length / 2)], resort = nearestResort(labels, mid[0], mid[1]);
     pl.bindPopup((resort ? '<span class="small muted">' + esc(englishFor(resort)) + (resort.ja && resort.ja !== englishFor(resort) ? ' · ' + esc(resort.ja) : '') + '</span><br>' : '') +
-      '<b>' + esc(l.name || (isLift ? 'Lift' : 'Ski run')) + '</b>' + (l.ja && l.ja !== l.name ? '<br><span class="muted">' + esc(l.ja) + '</span>' : '') +
+      '<b>' + esc(l.en || l.romaji || l.ja || l.name || (isLift ? 'Lift' : 'Ski run')) + '</b>' + (l.ja && (l.en || l.romaji) ? '<br><span class="muted" lang="ja">' + esc(l.ja) + '</span>' : '') +
       '<br><span class="small muted">' + (isLift ? esc(l.kind.replace('_', ' ')) : 'Run' + (l.diff ? ' · ' + esc(l.diff) : '')) + ' · OpenStreetMap</span>');
     poiLayer.addLayer(pl);
   });
@@ -528,8 +577,8 @@ async function renderPois() {
     if (p.c === 'parking' && z < 14) return;
     if (!vb.contains([p.lat, p.lon])) return;
     const m = L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', iconSize: [24, 24], iconAnchor: [12, 12], html: '<div class="poi ' + p.c + '">' + POI_GLYPH[p.c] + '</div>' }) });
-    const nm = p.en || p.name;
-    const html = '<b>' + esc(nm || POI_LABEL[p.c]) + '</b>' + (p.en && p.name && p.en !== p.name ? '<br><span class="muted">' + esc(p.name) + '</span>' : '') +
+    const en = p.en || p.romaji || '', ja = p.ja != null ? p.ja : p.name;
+    const html = '<b>' + esc(en || ja || POI_LABEL[p.c]) + '</b>' + (en && ja && ja !== en ? '<br><span class="muted" lang="ja">' + esc(ja) + '</span>' : '') +
       '<br><span class="muted small">' + POI_LABEL[p.c] + (p.fee ? ' · fee: ' + esc(p.fee) : '') + (p.cap ? ' · ' + esc(p.cap) + ' spaces' : '') + '</span>' +
       (p.hours ? '<br><span class="small">Hours: ' + esc(p.hours) + '</span>' : '') +
       '<br><a class="small" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lon + '">Directions</a>';
