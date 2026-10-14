@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.16';
+const APP_VERSION = '2026-10-15.17';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -66,7 +66,7 @@ const $ = (s, r = document) => r.querySelector(s);
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function toast(msg, ms = 2600) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, ms); }
 function today() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
-// Red skull time window. Season = since 1 November (the most recent one that has passed).
+// Recent-avalanche (black pin) time window. Season = since 1 November (the most recent one that has passed).
 const WINDOW_LABEL = { week: 'this week', month: 'this month', season: 'this season' };
 function seasonStart() { const n = new Date(); const y = n.getMonth() >= 10 ? n.getFullYear() : n.getFullYear() - 1; return new Date(y, 10, 1); }
 function recentLimitDays() {
@@ -403,7 +403,7 @@ function hazardIcon(p, cls) {
 }
 function pinIcon(kind, cls) {
   return L.divIcon({ className: '', iconSize: [34, 34], iconAnchor: [17, 17],
-    html: '<div class="pin ' + cls + '" style="position:relative">' + (kind === 'recent' ? SKULL : PATH) + (/unverified/.test(cls) ? '<span class="pin-ring"></span>' : '') + '</div>' });
+    html: '<div class="pin ' + cls + '" style="position:relative">' + (kind === 'recent' ? PATH : SKULL) + (/unverified/.test(cls) ? '<span class="pin-ring"></span>' : '') + '</div>' });
 }
 
 function trustOf(p) {
@@ -808,7 +808,7 @@ function showBrief() {
     const rec = (b.recentAvalanches || []);
     if (rec.length) {
       h += '<div class="stack"><p class="eyebrow">Recent avalanches in the report</p><div class="list">' + rec.map(r =>
-        '<button class="list-item" data-pin="' + esc(r.id) + '"><span>' + SKULL.replace('width="34" height="34"', 'width="26" height="26"') + '</span><span><span class="t">' + esc(r.place || 'Location not given') + '</span><span class="s"><br>' +
+        '<button class="list-item" data-pin="' + esc(r.id) + '"><span>' + PATH.replace('width="34" height="34"', 'width="26" height="26"') + '</span><span><span class="t">' + esc(r.place || 'Location not given') + '</span><span class="s"><br>' +
         fmtDate(r.date) + ' · size ' + esc(r.size || '?') + ' · ' + esc(r.type || '') + (r.aspect ? ' · ' + esc(r.aspect) : '') + (r.elevation ? ' · ' + esc(r.elevation) + ' m' : '') + (r.lat == null ? ' · not on map (no location given)' : '') + '</span></span></button>').join('') + '</div></div>';
     }
   }
@@ -820,7 +820,7 @@ function showBrief() {
   const unplaced = state.slides.filter(s => s.area === a.id && s.lat == null && !state.geo[s.id] && !state.placed[s.id]);
   if (unplaced.length) {
     h += '<div class="stack"><p class="eyebrow">Known slide paths not on the map yet</p><p class="small muted" style="margin:0">From JAN\'s incident database, which names the place but gives no coordinates. If you know where it is, place it.</p><div class="list">' +
-      unplaced.map(s => '<div class="list-item" style="cursor:default"><span>' + PATH.replace('width="34" height="34"', 'width="26" height="26"') + '</span><span><span class="t">' + esc(s.name) + '</span> <span class="s">' + esc(s.nameJa) + '</span><br><span class="s">' +
+      unplaced.map(s => '<div class="list-item" style="cursor:default"><span>' + SKULL.replace('width="34" height="34"', 'width="26" height="26"') + '</span><span><span class="t">' + esc(s.name) + '</span> <span class="s">' + esc(s.nameJa) + '</span><br><span class="s">' +
         s.incidents.map(i => fmtDate(i.date) + ': ' + esc(i.summary)).join('<br>') + '</span><br><span class="row" style="margin-top:6px"><button class="btn small" data-place="' + s.id + '">Place on map</button><a class="small" href="' + esc(s.incidents[0].url) + '" target="_blank" rel="noopener">JAN record</a></span></span></div>').join('') + '</div></div>';
   }
 
@@ -871,7 +871,7 @@ function showLayers() {
   if (eff === 'danger') h += '<div class="legend"><span><span class="sw" style="background:rgba(214,18,36,.6)"></span><b>Red: stay off.</b> Steep slopes the bulletin rates dangerous for their height and aspect.</span><span><span class="sw" style="background:rgba(247,148,30,.45)"></span><b>Amber: only with good reason</b>, one at a time, and a way out.</span><span class="muted">Ground below the shading (gullies, runouts) can still be hit by slides from above.</span></div>';
   else if (eff === 'slope') h += '<div class="legend"><span><span class="sw" style="background:rgb(250,225,0)"></span>27–29°</span><span><span class="sw" style="background:rgb(247,148,30)"></span>30–34°</span><span><span class="sw" style="background:rgb(226,32,40)"></span>35–39°</span><span><span class="sw" style="background:rgb(140,40,170)"></span>40–44°</span><span><span class="sw" style="background:rgb(40,30,50)"></span>45° and steeper</span><span class="muted">Most slab avalanches start on 30–45° slopes.</span></div>';
   h += aspectHtml;
-  h += '<div class="field"><span class="lbl">Show</span>' + tog('recent', 'Recent avalanches (red skulls)') + tog('path', 'Known slide paths (black pins)') + tog('hazard', 'Hazard and handy markers') + tog('onsen', '♨ Onsens') + tog('parking', 'Parking (zoom in to see)') + tog('labels', 'English place names and ski resorts') + tog('lifts', 'Lifts and ski runs') + tog('hut', 'Huts and lift stations') + tog('shop', 'Konbini, medical, koban') + '</div>';
+  h += '<div class="field"><span class="lbl">Show</span>' + tog('recent', 'Recent avalanches (black pins)') + tog('path', 'Known slide paths and incidents (red skulls)') + tog('hazard', 'Hazard and handy markers') + tog('onsen', '♨ Onsens') + tog('parking', 'Parking (zoom in to see)') + tog('labels', 'English place names and ski resorts') + tog('lifts', 'Lifts and ski runs') + tog('hut', 'Huts and lift stations') + tog('shop', 'Konbini, medical, koban') + '</div>';
   h += '<details class="glossary"><summary>Japanese map words</summary><p class="small muted">The topo map\'s own text is Japanese and can\'t be translated in place. These endings tell you what a name is.</p><dl class="kv small">' +
     [['岳 / 山 / 峰', 'dake / yama / mine: peak, mountain'], ['尾根', 'one: ridge'], ['沢', 'sawa: gully, creek'], ['谷', 'tani / dani: valley'], ['峠 / 乗越', 'tōge / nokkoshi: pass, col'], ['頭', 'atama / kashira: knoll, top'], ['平 / 原', 'taira / hara: flat, plateau'], ['池 / 湖', 'ike / ko: pond, lake'], ['滝', 'taki: waterfall'], ['川', 'kawa / gawa: river'], ['温泉', 'onsen: hot spring'], ['小屋', 'koya: hut'], ['登山口', 'tozanguchi: trailhead'], ['駐車場', 'chūshajō: parking'], ['スキー場', 'sukījō: ski area'], ['ゲート', 'gēto: backcountry gate'], ['雪崩', 'nadare: avalanche'], ['立入禁止', 'tachiiri kinshi: no entry']]
       .map(([j, e]) => '<dt lang="ja">' + j + '</dt><dd>' + e + '</dd>').join('') + '</dl></details>';
@@ -1341,7 +1341,7 @@ function showSettings() {
   h += '<div class="stack"><p class="eyebrow">Latest satellite (Sentinel-2)</p><p class="small muted" style="margin:0">Free from the EU Copernicus programme. New passes every few days; the app picks the newest clear one. One-off setup, about 5 minutes:</p>' +
     '<ol class="small" style="margin:0;padding-left:20px;display:grid;gap:4px"><li>Make a free account at <a href="https://dataspace.copernicus.eu/" target="_blank" rel="noopener">dataspace.copernicus.eu</a>.</li><li>Open the Sentinel Hub dashboard from your account, then <b>Configuration Utility</b>.</li><li>Copy the ID of the <b>Simple WMS</b> instance (or create one from the Simple WMS template).</li><li>Paste it here.</li></ol>' +
     '<div class="field"><label for="s-sat">Copernicus instance ID</label><input type="text" id="s-sat" autocomplete="off" spellcheck="false" value="' + esc(satId()) + '" placeholder="e.g. 1a2b3c4d-…"></div><button class="btn" id="sSat">Save and show satellite</button></div>';
-  h += '<div class="field"><span class="lbl">Show red skulls for slides from</span><div class="seg" id="winSeg">' + [['week', 'This week'], ['month', 'This month'], ['season', 'This season']].map(([v, l]) => '<button type="button" data-v="' + v + '" class="' + (state.recentWindow === v ? 'on' : '') + '">' + l + '</button>').join('') + '</div><span class="help">Season counts from 1 November. Slides older than a week show faded.</span></div>';
+  h += '<div class="field"><span class="lbl">Show recent avalanches (black pins) from</span><div class="seg" id="winSeg">' + [['week', 'This week'], ['month', 'This month'], ['season', 'This season']].map(([v, l]) => '<button type="button" data-v="' + v + '" class="' + (state.recentWindow === v ? 'on' : '') + '">' + l + '</button>').join('') + '</div><span class="help">Season counts from 1 November. Slides older than a week show faded.</span></div>';
   h += '<div class="stack"><p class="eyebrow">Elevation bands for ' + esc(a.name) + '</p><p class="small muted" style="margin:0">' + (a.bandsSource === 'JAN' ? 'Set from JAN\'s guide.' : 'These are estimates. If JAN or a local guide gives different heights, change them; the danger shading uses them.') + '</p><div class="grid3"><div class="field"><label for="s-alp">Alpine from (m)</label><input type="number" id="s-alp" value="' + bands.alpMin + '"></div><div class="field"><label for="s-tl">Treeline from (m)</label><input type="number" id="s-tl" value="' + bands.tlMin + '"></div><div class="field"><span class="lbl">&nbsp;</span><button class="btn" id="sBands">Save</button></div></div>' + (state.bandOverrides[a.id] ? '<button class="btn small ghost" id="sBandsReset">Reset to default</button>' : '') + '</div>';
   h += '<button class="btn" id="sHelp">How to use this app</button>';
   h += '<div class="stack"><p class="eyebrow">About · version ' + APP_VERSION + '</p><p class="small muted" style="margin:0">Topo and elevation: Geospatial Information Authority of Japan (GSI). Onsens, parking and other places: © OpenStreetMap contributors. Avalanche bulletins and incident records: Japan Avalanche Network (nadare.jp), summarised. This app helps you plan. It does not replace avalanche training, a beacon, shovel and probe, or your own judgement on the day.</p></div>';
@@ -1358,7 +1358,7 @@ function showSettings() {
   $('#sHelp').onclick = showHelp;
   $('#sImport').onclick = () => $('#importFile').click();
   wireChips();
-  $('#winSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; state.recentWindow = b.dataset.v; store.set('recentWindow', state.recentWindow); $('#winSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); renderPins(); toast('Red skulls: ' + WINDOW_LABEL[state.recentWindow], 1400); });
+  $('#winSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; state.recentWindow = b.dataset.v; store.set('recentWindow', state.recentWindow); $('#winSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); renderPins(); toast('Recent avalanches: ' + WINDOW_LABEL[state.recentWindow], 1400); });
   $('#sBands').onclick = () => {
     const alp = Number($('#s-alp').value), tl = Number($('#s-tl').value);
     if (!(alp > tl && tl > 0)) { toast('Alpine has to start higher than treeline'); return; }
@@ -1387,12 +1387,12 @@ function showHelp() {
     row(btnSvg('packsBtn'), 'Download', 'Save areas for offline use.') +
     row(btnSvg('locateBtn'), 'My position', 'GPS dot plus your height, slope, aspect and the danger rating where you stand. Works without mobile signal.') +
     row(btnSvg('addBtn'), 'Drop a pin', 'Report a slide, mark a slide path, or drop a hazard / handy marker. Or long-press the map.', 'red') +
-    row(btnSvg('settingsBtn'), 'Settings', 'Your name, share pins with mates, red skull time frame, satellite set-up, snow-zone heights.') + '</div>';
+    row(btnSvg('settingsBtn'), 'Settings', 'Your name, share pins with mates, recent-avalanche time frame, satellite set-up, snow-zone heights.') + '</div>';
   h += '<div class="stack"><p class="eyebrow">What the colours mean</p><div class="legend">' +
     '<span><span class="sw" style="background:rgba(214,18,36,.6)"></span><b>Red shading:</b> stay off today</span>' +
     '<span><span class="sw" style="background:rgba(247,148,30,.45)"></span><b>Amber shading:</b> only with good reason</span>' +
-    '<span>' + SKULL.replace('width="34" height="34"', 'width="18" height="18" style="vertical-align:-4px;margin-right:6px"') + '<b>Red skull:</b> recent avalanche</span>' +
-    '<span>' + PATH.replace('width="34" height="34"', 'width="18" height="18" style="vertical-align:-4px;margin-right:6px"') + '<b>Black pin:</b> known slide path</span>' +
+    '<span>' + SKULL.replace('width="34" height="34"', 'width="18" height="18" style="vertical-align:-4px;margin-right:6px"') + '<b>Red skull:</b> known slide path or past incident</span>' +
+    '<span>' + PATH.replace('width="34" height="34"', 'width="18" height="18" style="vertical-align:-4px;margin-right:6px"') + '<b>Black pin:</b> recent avalanche</span>' +
     '<span><span class="hz-pin tiny" style="background:#d97706">' + hazardSvg('rocks', 12) + '</span> <b>Markers:</b> amber hazard, red keep out, blue water, green good to know</span>' +
     '<span><span class="sw" style="background:repeating-linear-gradient(90deg,#ff2bd6 0 6px,transparent 6px 9px);border:0"></span><b>Dashed magenta:</b> planned route</span>' +
     '<span><span class="sw" style="background:#00b4ff;border:0"></span><b>Solid blue:</b> recorded track</span>' +

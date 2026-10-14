@@ -19,8 +19,8 @@ Backcountry avalanche map for Japan. Built-in areas: Hakuba, Myoko, Lotte Arai, 
 - **Lifts and runs** from OpenStreetMap, with the ski resort named in each lift's popup (green easy, red intermediate, black advanced), saved with the area pack.
 - **Avalanche brief** per area: danger rating for alpine, treeline and below treeline, the avalanche problems drawn as JAN-style aspect roses, a short summary, recent avalanches from the report, and links to the full bulletin.
 - **Danger shading**: red on steep slopes the bulletin says to stay off (by elevation band and aspect), amber where you need a good reason. Falls back to slope-angle shading when there is no rating.
-- **Red skull pins**: recent avalanches, from the daily bulletin and from riders. Show slides from this week, this month or this season (since 1 November), set in Settings.
-- **Black pins**: known slide paths. Seeded from JAN's fatal-incident database, plus rider reports.
+- **Black pins**: recent avalanches, from the daily bulletin and from riders. Show slides from this week, this month or this season (since 1 November), set in Settings.
+- **Red skull pins**: known slide paths and past incidents. Seeded from JAN's fatal-incident database, plus rider reports.
 - **Rider reports** use the standard observation fields: size 1–5, avalanche type, trigger, aspect, elevation, slope, crown depth, width, run length, bed surface, involvement, injuries, and how the reporter knows. Elevation, slope and aspect auto-fill from the elevation data.
 - **Verification and trust**: other riders confirm or dispute a pin. 1 confirmation = Confirmed, 3+ = Trusted, more disputes than confirmations = Disputed. You can't verify your own pin.
 - **Sharing**: pins live on the phone. Settings → Share my pins sends a file; your mate imports it, verifies, and sends theirs back. Imports merge and never duplicate.
