@@ -47,8 +47,9 @@ const state = {
   customAreas: store.get('customAreas', []), boundsOverrides: store.get('boundsOverrides', {}),
   slides: [], pins: store.get('pins', []),
   shade: store.get('shade', 'danger'), base: store.get('base', 'sat') === 'topo' ? 'topo' : 'sat',
-  show: Object.assign({ recent: true, path: true, onsen: true, parking: true, hut: true, shop: true, lifts: true }, store.get('show', {})),
+  show: Object.assign({ recent: true, path: true, onsen: true, parking: true, hut: true, shop: true, lifts: true, labels: true }, store.get('show', {})),
   recentDays: store.get('recentDays', 14),
+  aspectSel: store.get('aspectSel', ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']), aspectMatch: store.get('aspectMatch', true),
   bandOverrides: store.get('bandOverrides', {}),
   packs: store.get('packs', {}),
   geo: store.get('geo', {}),
@@ -171,6 +172,24 @@ function dangerClass(slope, aspectDeg, elev, ctx) {
   if (r === 2) return flagged ? DANGER_AMBER : null;
   return null;
 }
+/* Aspect shading: every slope 20°+ coloured by the way it faces. With "match the report" on,
+   the aspect + elevation combos the bulletin's problems flag are strong and the rest are faint,
+   so you can see at a glance which slopes the report is worried about and plan a line on the others. */
+const ASPECT_RGB = { N: [37, 99, 235], NE: [6, 182, 212], E: [22, 163, 74], SE: [163, 190, 20], S: [234, 179, 8], SW: [249, 115, 22], W: [220, 38, 38], NW: [147, 51, 234] };
+function aspectClass(slope, aspectDeg, elev, ctx) {
+  if (slope < 20) return null;
+  const asp = aspectName(aspectDeg); if (!state.aspectSel.includes(asp)) return null;
+  const c = ASPECT_RGB[asp];
+  if (ctx) {
+    const band = elev >= ctx.alpMin ? 'alp' : elev >= ctx.tlMin ? 'tl' : 'btl';
+    return [c[0], c[1], c[2], ctx.flags[band].has(asp) ? (slope >= 30 ? 175 : 130) : 28];
+  }
+  return [c[0], c[1], c[2], slope >= 30 ? 130 : 75];
+}
+function aspectMatchActive() {
+  const b = bulletinFor(state.area.id);
+  return state.aspectMatch && !!(b && b.problems && b.problems.length);
+}
 function slopeClass(slope) { for (const [min, col] of SLOPE_COLS) if (slope >= min) return col; return null; }
 function shadeContext() {
   const a = state.area; const b = bulletinFor(a.id); const bands = bandsFor(a);
@@ -196,11 +215,12 @@ async function drawShade(canvas, { x, y, z }) {
   const d = await getDem(dz, dx, dy); if (!d) return;
   const span = 256 / scale, offX = (x % scale) * span, offY = (y % scale) * span;
   const res = pxRes(tile2lat(dy + 0.5, dz), dz);
-  const ctx = mode === 'danger' ? shadeContext() : null;
+  const ctx = mode === 'danger' || (mode === 'aspect' && aspectMatchActive()) ? shadeContext() : null;
   const g = canvas.getContext('2d'); const img = g.createImageData(256, 256); const px = img.data;
   for (let j = 0; j < span; j++) for (let i = 0; i < span; i++) {
     const di = offX + i, dj = offY + j; const sa = slopeAspect(d, di, dj, res); if (!sa) continue;
-    const col = ctx ? dangerClass(sa.slope, sa.aspect, d[dj * 256 + di], ctx) : slopeClass(sa.slope);
+    const col = mode === 'aspect' ? aspectClass(sa.slope, sa.aspect, d[dj * 256 + di], ctx)
+      : mode === 'danger' ? dangerClass(sa.slope, sa.aspect, d[dj * 256 + di], ctx) : slopeClass(sa.slope);
     if (!col) continue;
     for (let by = 0; by < scale; by++) for (let bx = 0; bx < scale; bx++) {
       const p = ((j * scale + by) * 256 + i * scale + bx) * 4; px[p] = col[0]; px[p + 1] = col[1]; px[p + 2] = col[2]; px[p + 3] = col[3];
@@ -374,11 +394,35 @@ function poiCategory(t) {
   return null;
 }
 async function loadPois(area) {
-  const empty = { points: [], lines: [] };
+  const empty = { points: [], lines: [], labels: [] };
   if (!('caches' in window)) return empty;
   const r = await caches.match('/pois/' + area.id).catch(() => null);
   if (!r) return empty;
   try { const j = await r.json(); return Array.isArray(j) ? { points: j, lines: [] } : j; } catch (e) { return empty; }
+}
+function labelCategory(t) {
+  if (t.landuse === 'winter_sports') return 'resort';
+  if (t.natural === 'peak' || t.natural === 'volcano') return 'peak';
+  if (t.natural === 'saddle') return 'saddle';
+  if (t.natural === 'ridge') return 'ridge';
+  if (t.natural === 'valley') return 'valley';
+  if (t.natural === 'water') return 'water';
+  if (t.place) return 'place';
+  return null;
+}
+// When OpenStreetMap has no English name, say what the thing is from the Japanese ending.
+const JA_WORDS = [['スキー場', 'ski area'], ['温泉', 'onsen'], ['尾根', 'ridge'], ['乗越', 'col'], ['峠', 'pass'], ['岳', 'peak'], ['峰', 'peak'], ['山', 'mountain'], ['沢', 'gully / creek'], ['谷', 'valley'], ['川', 'river'], ['池', 'pond'], ['湖', 'lake'], ['滝', 'waterfall'], ['平', 'flat'], ['原', 'plateau'], ['台', 'plateau'], ['頭', 'top / knoll']];
+const LABEL_TYPE = { resort: 'Ski resort', peak: 'Peak', saddle: 'Pass / col', ridge: 'Ridge', valley: 'Valley', water: 'Lake / pond', place: 'Village' };
+function englishFor(l) {
+  if (l.en) return l.en;
+  const w = JA_WORDS.find(([k]) => (l.ja || '').endsWith(k));
+  return w ? w[1].charAt(0).toUpperCase() + w[1].slice(1) : LABEL_TYPE[l.c];
+}
+const LABEL_MINZ = { resort: 11, peak: 12, place: 12, saddle: 13, ridge: 13, valley: 13, water: 13 };
+function nearestResort(labels, lat, lon) {
+  let best = null, bd = 0.03;
+  labels.forEach(l => { if (l.c !== 'resort') return; const d = Math.hypot(l.lat - lat, (l.lon - lon) * 0.8); if (d < bd) { bd = d; best = l; } });
+  return best;
 }
 const RUN_COL = { novice: '#1f9d55', easy: '#1f9d55', intermediate: '#d42a2a', advanced: '#111', expert: '#111', freeride: '#111' };
 async function renderPois() {
@@ -387,13 +431,22 @@ async function renderPois() {
   const data = state._pois && state._pois.area === state.area.id ? state._pois.data : (state._pois = { area: state.area.id, data: await loadPois(state.area) }).data;
   const pois = data.points || [];
   const z = map.getZoom(); const vb = map.getBounds().pad(0.2);
+  const labels = data.labels || [];
+  if (state.show.labels) labels.forEach(l => {
+    if (z < LABEL_MINZ[l.c] || !vb.contains([l.lat, l.lon])) return;
+    const en = englishFor(l), showJa = l.ja && l.ja !== en;
+    const html = '<div class="map-label lbl-' + l.c + '">' + (l.c === 'peak' ? '▲ ' : '') + '<b>' + esc(en) + '</b>' + (l.ele && l.c === 'peak' ? ' ' + l.ele + ' m' : '') + (showJa ? '<span class="ja">' + esc(l.ja) + '</span>' : '') + '</div>';
+    poiLayer.addLayer(L.marker([l.lat, l.lon], { icon: L.divIcon({ className: 'label-wrap', iconSize: null, html }), interactive: false, keyboard: false, zIndexOffset: l.c === 'resort' ? 300 : 0 }));
+  });
   // Lifts and runs (OpenStreetMap). Japanese colour convention: green easy, red intermediate, black advanced.
   if (state.show.lifts) (data.lines || []).forEach(l => {
     const isLift = l.c === 'lift';
     const pl = L.polyline(l.pts, isLift
       ? { renderer: lineRenderer, color: '#1b2430', weight: 2.5, opacity: .95 }
       : { renderer: lineRenderer, color: RUN_COL[l.diff] || '#6b7a89', weight: 3, opacity: .7, dashArray: l.diff ? null : '4 4' });
-    pl.bindPopup('<b>' + esc(l.name || (isLift ? 'Lift' : 'Ski run')) + '</b>' + (l.ja && l.ja !== l.name ? '<br><span class="muted">' + esc(l.ja) + '</span>' : '') +
+    const mid = l.pts[Math.floor(l.pts.length / 2)], resort = nearestResort(labels, mid[0], mid[1]);
+    pl.bindPopup((resort ? '<span class="small muted">' + esc(englishFor(resort)) + (resort.ja && resort.ja !== englishFor(resort) ? ' · ' + esc(resort.ja) : '') + '</span><br>' : '') +
+      '<b>' + esc(l.name || (isLift ? 'Lift' : 'Ski run')) + '</b>' + (l.ja && l.ja !== l.name ? '<br><span class="muted">' + esc(l.ja) + '</span>' : '') +
       '<br><span class="small muted">' + (isLift ? esc(l.kind.replace('_', ' ')) : 'Run' + (l.diff ? ' · ' + esc(l.diff) : '')) + ' · OpenStreetMap</span>');
     poiLayer.addLayer(pl);
   });
@@ -447,14 +500,18 @@ async function downloadPack(area, maxZ, onProgress) {
     'nwr["natural"="hot_spring"](' + bb + ');nwr["amenity"="public_bath"](' + bb + ');nwr["bath:type"="onsen"](' + bb + ');' +
     'nwr["amenity"="parking"](' + bb + ');nwr["tourism"~"^(alpine_hut|wilderness_hut)$"](' + bb + ');' +
     'node["aerialway"="station"](' + bb + ');nwr["shop"="convenience"](' + bb + ');' +
-    'nwr["amenity"~"^(hospital|clinic|police)$"](' + bb + '););out center tags;' +
+    'nwr["amenity"~"^(hospital|clinic|police)$"](' + bb + ');' +
+    // Names for the English label layer: resorts, peaks, passes, ridges, valleys, villages, lakes
+    'nwr["landuse"="winter_sports"]["name"](' + bb + ');node["natural"~"^(peak|volcano|saddle)$"]["name"](' + bb + ');' +
+    'way["natural"~"^(ridge|valley)$"]["name"](' + bb + ');node["place"~"^(town|village|hamlet|locality)$"]["name"](' + bb + ');' +
+    'nwr["natural"="water"]["name"](' + bb + '););out center tags;' +
     '(way["aerialway"~"^(cable_car|gondola|mixed_lift|chair_lift|drag_lift|t-bar|j-bar|platter|rope_tow)$"](' + bb + ');' +
     'way["piste:type"="downhill"](' + bb + '););out geom tags;';
   try {
     const r = await fetch(OVERPASS, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
     if (r.ok) {
       const j = await r.json();
-      const list = [], lines = [];
+      const list = [], lines = [], labels = [];
       (j.elements || []).forEach(el => {
         const t = el.tags || {};
         if (el.geometry && (t.aerialway || t['piste:type'])) {
@@ -462,12 +519,14 @@ async function downloadPack(area, maxZ, onProgress) {
           if (pts.length > 1) lines.push({ c: t.aerialway ? 'lift' : 'run', kind: t.aerialway || '', name: t['name:en'] || t.name || t['piste:name'] || '', ja: t.name || '', diff: t['piste:difficulty'] || '', pts });
           return;
         }
-        const c = poiCategory(t); if (!c) return;
         const lat = el.lat != null ? el.lat : el.center && el.center.lat, lon = el.lon != null ? el.lon : el.center && el.center.lon;
         if (lat == null) return;
+        const lc = labelCategory(t);
+        if (lc) { labels.push({ c: lc, lat, lon, ja: t.name || '', en: t['name:en'] || t['name:ja-Latn'] || t['name:ja_rm'] || '', ele: parseInt(t.ele, 10) || null }); if (lc !== 'resort') return; }
+        const c = poiCategory(t); if (!c) return;
         list.push({ c, lat, lon, name: t.name || '', en: t['name:en'] || '', fee: t.fee || '', hours: t.opening_hours || '', cap: t.capacity || '' });
       });
-      const json = JSON.stringify({ points: list, lines });
+      const json = JSON.stringify({ points: list, lines, labels });
       await cache.put('/pois/' + area.id, new Response(json, { headers: { 'Content-Type': 'application/json' } }));
       bytes += json.length;
     }
@@ -554,6 +613,19 @@ function roseSvg(zones) {
   return s;
 }
 
+function aspectRoseSvg() {
+  const cx = 40, cy = 40, r = 30;
+  let s = '<svg viewBox="0 0 80 80" width="80" height="80" role="img" aria-label="Aspect colours">';
+  ASPECTS.forEach((asp, k) => {
+    const a0 = (k * 45 - 22.5 - 90) * Math.PI / 180, a1 = (k * 45 + 22.5 - 90) * Math.PI / 180, am = (k * 45 - 90) * Math.PI / 180;
+    const p = (rr, a) => (cx + rr * Math.cos(a)).toFixed(2) + ' ' + (cy + rr * Math.sin(a)).toFixed(2);
+    const on = state.aspectSel.includes(asp);
+    s += '<path d="M' + cx + ' ' + cy + 'L' + p(r, a0) + 'A' + r + ' ' + r + ' 0 0 1 ' + p(r, a1) + 'Z" fill="rgb(' + ASPECT_RGB[asp].join(',') + ')" fill-opacity="' + (on ? .9 : .15) + '" stroke="var(--surface)" stroke-width="1"/>';
+    const [tx, ty] = p(r + 7, am).split(' ');
+    s += '<text x="' + tx + '" y="' + (+ty + 2.5) + '" text-anchor="middle" class="rose-label">' + asp + '</text>';
+  });
+  return s + '</svg>';
+}
 function showBrief() {
   const a = state.area, b = bulletinFor(a.id), bands = bandsFor(a);
   let h = '';
@@ -626,13 +698,30 @@ function showLayers() {
     }
   }
   h += '</div>';
-  h += '<div class="field"><span class="lbl">Shading</span>' + seg('shade', state.shade, [['danger', 'Today\'s danger'], ['slope', 'Slope angle'], ['off', 'Off']]) + '</div>';
+  h += '<div class="field"><span class="lbl">Shading</span>' + seg('shade', state.shade, [['danger', 'Danger'], ['aspect', 'Aspect'], ['slope', 'Slope'], ['off', 'Off']]) + '</div>';
   if (state.shade === 'danger' && eff !== 'danger') h += '<div class="card warn small">No danger rating for ' + esc(state.area.name) + ' right now' + (b && b.status === 'off-season' ? ' (off season)' : '') + ', so the map is showing slope angles instead.</div>';
+  if (eff === 'aspect') {
+    const matching = aspectMatchActive();
+    h += '<div class="aspect-legend">' + aspectRoseSvg() + '<div class="stack small">' +
+      '<span>Slopes 20° and steeper, coloured by the way they face. Stronger colour from 30°.</span>' +
+      '<label class="row"><input type="checkbox" id="aspMatch"' + (state.aspectMatch ? ' checked' : '') + '> Match today\'s report</label>' +
+      '<span class="muted">' + (matching ? 'Strong = aspect and height the report flags. Faint = not flagged. Pick lines in the faint colours.' : state.aspectMatch ? 'No avalanche problems in the report right now, so every aspect shows the same.' : 'Showing every aspect the same.') + '</span></div></div>' +
+      '<div class="field"><span class="lbl">Show these aspects</span><div class="chips aspects" id="aspChips">' + ASPECTS.map(a => '<button type="button" data-v="' + a + '" class="' + (state.aspectSel.includes(a) ? 'on' : '') + '" style="border-left:6px solid rgb(' + ASPECT_RGB[a].join(',') + ')">' + a + '</button>').join('') + '</div><span class="help">Tap to hide an aspect, e.g. show only north-facing to find cold snow.</span></div>';
+  }
   if (eff === 'danger') h += '<div class="legend"><span><span class="sw" style="background:rgba(214,18,36,.6)"></span><b>Red: stay off.</b> Steep slopes the bulletin rates dangerous for their height and aspect.</span><span><span class="sw" style="background:rgba(247,148,30,.45)"></span><b>Amber: only with good reason</b>, one at a time, and a way out.</span><span class="muted">Ground below the shading (gullies, runouts) can still be hit by slides from above.</span></div>';
   else if (eff === 'slope') h += '<div class="legend"><span><span class="sw" style="background:rgb(250,225,0)"></span>27–29°</span><span><span class="sw" style="background:rgb(247,148,30)"></span>30–34°</span><span><span class="sw" style="background:rgb(226,32,40)"></span>35–39°</span><span><span class="sw" style="background:rgb(140,40,170)"></span>40–44°</span><span><span class="sw" style="background:rgb(40,30,50)"></span>45° and steeper</span><span class="muted">Most slab avalanches start on 30–45° slopes.</span></div>';
-  h += '<div class="field"><span class="lbl">Show</span>' + tog('recent', 'Recent avalanches (red skulls)') + tog('path', 'Known slide paths (black pins)') + tog('onsen', '♨ Onsens') + tog('parking', 'Parking (zoom in to see)') + tog('lifts', 'Lifts and ski runs') + tog('hut', 'Huts and lift stations') + tog('shop', 'Konbini, medical, koban') + '</div>';
-  openSheet('Layers', h, { view: 'layers' });
+  h += '<div class="field"><span class="lbl">Show</span>' + tog('recent', 'Recent avalanches (red skulls)') + tog('path', 'Known slide paths (black pins)') + tog('onsen', '♨ Onsens') + tog('parking', 'Parking (zoom in to see)') + tog('labels', 'English place names and ski resorts') + tog('lifts', 'Lifts and ski runs') + tog('hut', 'Huts and lift stations') + tog('shop', 'Konbini, medical, koban') + '</div>';
+  h += '<details class="glossary"><summary>Japanese map words</summary><p class="small muted">The topo map\'s own text is Japanese and can\'t be translated in place. These endings tell you what a name is.</p><dl class="kv small">' +
+    [['岳 / 山 / 峰', 'dake / yama / mine: peak, mountain'], ['尾根', 'one: ridge'], ['沢', 'sawa: gully, creek'], ['谷', 'tani / dani: valley'], ['峠 / 乗越', 'tōge / nokkoshi: pass, col'], ['頭', 'atama / kashira: knoll, top'], ['平 / 原', 'taira / hara: flat, plateau'], ['池 / 湖', 'ike / ko: pond, lake'], ['滝', 'taki: waterfall'], ['川', 'kawa / gawa: river'], ['温泉', 'onsen: hot spring'], ['小屋', 'koya: hut'], ['登山口', 'tozanguchi: trailhead'], ['駐車場', 'chūshajō: parking'], ['スキー場', 'sukījō: ski area'], ['ゲート', 'gēto: backcountry gate'], ['雪崩', 'nadare: avalanche'], ['立入禁止', 'tachiiri kinshi: no entry']]
+      .map(([j, e]) => '<dt lang="ja">' + j + '</dt><dd>' + e + '</dd>').join('') + '</dl></details>';
+  openSheet('Layers', h, { view: 'layers', tall: true });
   const gs = $('#goSatSetup'); if (gs) gs.onclick = showSettings;
+  const am = $('#aspMatch'); if (am) am.onchange = () => { state.aspectMatch = am.checked; store.set('aspectMatch', am.checked); shadeLayer.redraw(); showLayers(); };
+  const ac = $('#aspChips'); if (ac) ac.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return; const a = b.dataset.v;
+    state.aspectSel = state.aspectSel.includes(a) ? state.aspectSel.filter(x => x !== a) : state.aspectSel.concat(a);
+    store.set('aspectSel', state.aspectSel); b.classList.toggle('on'); shadeLayer.redraw();
+  });
   const sd = $('#sheetBody [data-chips="satdate"]');
   if (sd) sd.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; sat.date = b.dataset.v; buildSatLayer(); showLayers(); });
   $('#sheetBody').querySelectorAll('[data-seg] button').forEach(btn => btn.onclick = () => {

@@ -8,7 +8,9 @@ Backcountry avalanche map for Japan. Built-in areas: Hakuba, Myoko, Lotte Arai, 
 - **Area packs**: download only the areas you ride. Standard detail is roughly 10–25 MB per area, Detailed roughly 25–80 MB. Nothing else is stored.
 - **Your own areas**: Area menu → Add your own area. Frame it on the map, name it, pick the nearest JAN bulletin and band heights. Every area (built-in or yours) has Adjust box. Your areas travel with your shared pins file.
 - **Map**: Latest satellite by default (Sentinel-2, 10 m, newest clear pass in the last 90 days, pick earlier passes by date; needs a free Copernicus account and signal). GSI topo underneath, and on its own when there's no signal.
-- **Lifts and runs** from OpenStreetMap (green easy, red intermediate, black advanced), saved with the area pack.
+- **Aspect shading**: slopes 20°+ coloured by the way they face (N blue, E green, S yellow, W red and the in-betweens). "Match today's report" makes the aspects and heights the bulletin flags strong and the rest faint, for route planning. Tap aspects on or off.
+- **English labels** over the map: ski resorts, peaks with height, passes, ridges, valleys, villages and lakes, English with the Japanese underneath. Where OpenStreetMap has no English name, the label says what it is (Peak, Ridge, Pass). Layers also has a Japanese map-word glossary, since the topo map's own printing is Japanese.
+- **Lifts and runs** from OpenStreetMap, with the ski resort named in each lift's popup (green easy, red intermediate, black advanced), saved with the area pack.
 - **Avalanche brief** per area: danger rating for alpine, treeline and below treeline, the avalanche problems drawn as JAN-style aspect roses, a short summary, recent avalanches from the report, and links to the full bulletin.
 - **Danger shading**: red on steep slopes the bulletin says to stay off (by elevation band and aspect), amber where you need a good reason. Falls back to slope-angle shading when there is no rating.
 - **Red skull pins**: recent avalanches, from the daily bulletin and from riders. They hide after 14 days (adjustable).

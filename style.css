@@ -254,3 +254,18 @@ a { color: var(--accent); }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 .warn-text { color: var(--warn); font-weight: 600; }
+
+/* English labels over the map */
+.label-wrap { background: none; border: 0; }
+.map-label { transform: translate(-50%, -50%); white-space: nowrap; text-align: center; font-size: 12px; line-height: 1.15; color: #10202e;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff; pointer-events: none; }
+.map-label b { font-weight: 700; }
+.map-label .ja { display: block; font-size: 10px; font-weight: 500; opacity: .85; }
+.map-label.lbl-resort { font-size: 13px; color: #0b3a66; text-transform: uppercase; letter-spacing: .04em; }
+.map-label.lbl-resort b::before { content: "⛷ "; letter-spacing: 0; }
+.map-label.lbl-place { color: #3b2a14; }
+.map-label.lbl-water { color: #0b4f8a; font-style: italic; }
+.map-label.lbl-saddle, .map-label.lbl-ridge, .map-label.lbl-valley { font-size: 11px; color: #33424f; }
+.aspect-legend { display: grid; grid-template-columns: 80px 1fr; gap: 12px; align-items: center; }
+.glossary summary { cursor: pointer; font-weight: 600; min-height: 32px; }
+.glossary dt { font-weight: 700; color: var(--ink); }
