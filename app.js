@@ -2,6 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
+const APP_VERSION = '2026-10-15.4';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -772,6 +773,14 @@ function showLayers() {
   $('#sheetBody').querySelectorAll('[data-show]').forEach(cb => cb.onchange = () => { state.show[cb.dataset.show] = cb.checked; store.set('show', state.show); renderPins(); renderPois(); });
 }
 
+// Make sure the compass button exists even if an older saved page is showing.
+(function ensureAspectBtn() {
+  if ($('#aspectBtn')) return;
+  const b = document.createElement('button');
+  b.id = 'aspectBtn'; b.className = 'fab'; b.setAttribute('aria-label', 'Aspect overlay'); b.title = 'Aspect overlay';
+  b.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 4.5l2.2 7.5L12 19.5 9.8 12z" fill="currentColor"/></svg>';
+  const fabs = $('.fabs'); fabs.insertBefore(b, $('#packsBtn') || fabs.firstChild);
+})();
 function setAspect(on) {
   state.aspectOn = on; store.set('aspectOn', on);
   $('#aspectBtn').classList.toggle('on', on); $('#aspectBtn').setAttribute('aria-pressed', on);
@@ -1181,7 +1190,7 @@ function showSettings() {
     '<div class="field"><label for="s-sat">Copernicus instance ID</label><input type="text" id="s-sat" autocomplete="off" spellcheck="false" value="' + esc(satId()) + '" placeholder="e.g. 1a2b3c4d-…"></div><button class="btn" id="sSat">Save and show satellite</button></div>';
   h += '<div class="field"><span class="lbl">Show red skulls for slides in the last</span>' + chips('days', ['3', '7', '14', '30'], String(state.recentDays)) + '<span class="help">Days. Older reports hide automatically.</span></div>';
   h += '<div class="stack"><p class="eyebrow">Elevation bands for ' + esc(a.name) + '</p><p class="small muted" style="margin:0">' + (a.bandsSource === 'JAN' ? 'Set from JAN\'s guide.' : 'These are estimates. If JAN or a local guide gives different heights, change them; the danger shading uses them.') + '</p><div class="grid3"><div class="field"><label for="s-alp">Alpine from (m)</label><input type="number" id="s-alp" value="' + bands.alpMin + '"></div><div class="field"><label for="s-tl">Treeline from (m)</label><input type="number" id="s-tl" value="' + bands.tlMin + '"></div><div class="field"><span class="lbl">&nbsp;</span><button class="btn" id="sBands">Save</button></div></div>' + (state.bandOverrides[a.id] ? '<button class="btn small ghost" id="sBandsReset">Reset to default</button>' : '') + '</div>';
-  h += '<div class="stack"><p class="eyebrow">About</p><p class="small muted" style="margin:0">Topo and elevation: Geospatial Information Authority of Japan (GSI). Onsens, parking and other places: © OpenStreetMap contributors. Avalanche bulletins and incident records: Japan Avalanche Network (nadare.jp), summarised. This app helps you plan. It does not replace avalanche training, a beacon, shovel and probe, or your own judgement on the day.</p></div>';
+  h += '<div class="stack"><p class="eyebrow">About · version ' + APP_VERSION + '</p><p class="small muted" style="margin:0">Topo and elevation: Geospatial Information Authority of Japan (GSI). Onsens, parking and other places: © OpenStreetMap contributors. Avalanche bulletins and incident records: Japan Avalanche Network (nadare.jp), summarised. This app helps you plan. It does not replace avalanche training, a beacon, shovel and probe, or your own judgement on the day.</p></div>';
   openSheet('Settings', h, { view: 'settings', tall: true });
   $('#s-name').onchange = e => store.set('reporterName', e.target.value.trim());
   $('#sSat').onclick = () => {
@@ -1234,6 +1243,12 @@ async function boot() {
   state.bulletins = store.get('bulletinsCache', null); updateChip();
   renderPins();
   loadBulletins(true);
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { });
+  if ('serviceWorker' in navigator) {
+    // Always check for a new version, and when one takes over, reload once so old and new files never mix.
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => { });
+  }
 }
 boot();
