@@ -3,13 +3,17 @@
    - Map + elevation tiles: served from whichever area pack holds them; never cached on the fly,
      so storage only grows when you choose to download an area.
    - Bulletin: network first, last saved copy when offline. */
-const SHELL = 'shell-v9';
+const SHELL = 'shell-v10';
 const SHELL_FILES = ['./', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest',
   'vendor/leaflet.js', 'vendor/leaflet.css', 'icons/icon-192.png', 'icons/icon-512.png',
   'data/areas.json', 'data/known-slides.json', 'data/bulletins.json'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(SHELL).then(c => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
+  // App files, plus every built-in area's place names so they work offline from the first install.
+  e.waitUntil(caches.open(SHELL).then(c => c.addAll(SHELL_FILES).then(() =>
+    fetch('data/areas.json').then(r => r.json()).then(j => Promise.all((j.areas || []).map(a => c.add('data/places/' + a.id + '.json').catch(() => { }))))
+      .catch(() => { })
+  )).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('shell-') && k !== SHELL).map(k => caches.delete(k)))).then(() => self.clients.claim()));

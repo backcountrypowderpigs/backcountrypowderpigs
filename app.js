@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.6';
+const APP_VERSION = '2026-10-15.7';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -465,6 +465,11 @@ async function loadPois(area) {
   const empty = { points: [], lines: [], labels: [] };
   if (!('caches' in window)) return empty;
   let data = null;
+  // 1. Built into the app (built-in areas): instant, works offline, no waiting on a public server.
+  if (!area.custom) {
+    try { const r = await fetch('data/places/' + area.id + '.json'); if (r.ok) { const j = await r.json(); if (j && j.v >= 3) return j; } } catch (e) { }
+  }
+  // 2. Saved on this phone from an earlier live load (your own areas).
   try { const r = await caches.match('/pois/' + area.id); if (r) { const j = await r.json(); data = Array.isArray(j) ? { points: j, lines: [], labels: [] } : j; } } catch (e) { }
   const stale = !data || (data.v || 0) < 3; // first visit, or saved before the English names were added
   if (stale && navigator.onLine) {
