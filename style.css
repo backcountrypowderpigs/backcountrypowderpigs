@@ -273,3 +273,39 @@ a { color: var(--accent); }
 .map-label.lbl-station b::before { content: "▣ "; }
 .map-label.lbl-sight { color: #6b2c4a; font-size: 11px; }
 .map-label.lbl-sight b::before { content: "✦ "; }
+
+/* ---------- routes and tracks ---------- */
+.fab { width: 44px; height: 44px; }
+.fab-main { width: 58px; height: 58px; }
+.fabs { gap: 8px; }
+.fab.rec-on { background: #e11d48; color: #fff; border-color: #e11d48; }
+.fab.rec-on svg circle:last-child { fill: #fff; }
+.route-bar {
+  position: fixed; z-index: 1050; left: max(12px, env(safe-area-inset-left, 0px)); right: calc(max(12px, env(safe-area-inset-right, 0px)) + 70px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); max-width: 520px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow);
+  padding: 12px; display: grid; gap: 10px;
+}
+.route-bar-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.plan-dot::before, .rec-dot::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+.plan-dot::before { background: #ff2bd6; }
+.rec-dot::before { background: #e11d48; animation: recpulse 1.2s infinite; }
+.rec-dot.paused::before { background: var(--muted); animation: none; }
+@keyframes recpulse { 50% { opacity: .25; } }
+.rec-clock { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 18px; margin-left: auto; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(66px, 1fr)); gap: 6px; }
+.stat { display: grid; gap: 2px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }
+.stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; }
+.stat .v { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+body.recording .readout, body.planning .readout { display: none; }
+body.recording .scale-hide, body.planning .leaflet-control-scale { visibility: hidden; }
+.vertex { width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 3px solid #ff2bd6; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.vertex.first { background: #16a34a; border-color: #fff; }
+.route-item { grid-template-columns: 22px 1fr auto; align-items: center; }
+.route-item .vis { font-size: 13px; display: flex; gap: 4px; align-items: center; color: var(--muted); }
+.swatch { display: block; width: 18px; height: 6px; border-radius: 3px; }
+.swatch.plan { background: repeating-linear-gradient(90deg, #ff2bd6 0 6px, transparent 6px 9px); }
+.swatch.track { background: #00b4ff; }
+.profile { width: 100%; height: 90px; display: block; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; }
+.profile-fill { fill: rgba(0, 180, 255, .18); }
+.profile-line { fill: none; stroke: #00b4ff; stroke-width: 2; vector-effect: non-scaling-stroke; }
