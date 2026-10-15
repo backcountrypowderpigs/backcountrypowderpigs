@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-16.1';
+const APP_VERSION = '2026-10-16.3';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -50,7 +50,7 @@ const state = {
   customAreas: store.get('customAreas', []), boundsOverrides: store.get('boundsOverrides', {}),
   slides: [], pins: store.get('pins', []),
   shade: store.get('shade', 'danger'), base: store.get('base', 'sat') === 'topo' ? 'topo' : 'sat',
-  show: Object.assign({ recent: true, path: true, hazard: true, onsen: true, wild: true, parking: true, hut: true, shop: true, lifts: true, labels: true }, store.get('show', {})),
+  show: Object.assign({ recent: true, path: true, hazard: true, onsen: true, wild: true, parking: true, hut: true, shop: true, lifts: true, labels: true, gsinames: true }, store.get('show', {})),
   recentWindow: ['week', 'month', 'season'].includes(store.get('recentWindow', '')) ? store.get('recentWindow', '') : 'week',
   aspectSel: store.get('aspectSel', ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']), aspectMatch: store.get('aspectMatch', true),
   aspectOn: store.get('aspectOn', store.get('shade', '') === 'aspect'),
@@ -358,6 +358,7 @@ function setBase() {
   if (state.base === 'sat') return ensureSat();
   updateSatFlag();
 }
+function drawOutlineNames() { state._names = null; renderNames(); }
 function drawOutline() {
   if (areaOutline) map.removeLayer(areaOutline);
   areaOutline = L.rectangle(state.area.bounds, { color: '#17507e', weight: 2, dashArray: '6 6', fill: false, interactive: false }).addTo(map);
@@ -637,6 +638,45 @@ function withWildOnsens(points, areaId) {
   const near = p => seeds.some(q => map.distance([p.lat, p.lon], [q.lat, q.lon]) < 300);
   return points.filter(p => !((p.c === 'onsen' || p.c === 'wild') && !p.id && near(p))).concat(seeds);
 }
+/* ------------------------------------------------------------------ English for the topo map's own names
+   data/labels/<area>.json: every name GSI prints on the topo (valleys, creeks, ridges, passes, peaks, waterfalls,
+   settlements, shrines, hospitals...) with a romaji reading and what it is. Built by an Action from GSI's vector map.
+   Shown under the Japanese text on the map, and used by the rescue panel to say where you are. */
+const nameLayer = L.layerGroup().addTo(map);
+const NAME_COL = { water: '#1d6fd1', river: '#1d6fd1', waterfall: '#1d6fd1', lake: '#1d6fd1', onsen: '#c2410c',
+  peak: '#6b3a1f', pass: '#6b3a1f', terrain: '#6b3a1f', plateau: '#6b3a1f', range: '#6b3a1f', crater: '#6b3a1f' };
+async function loadNames(area) {
+  if (state._names && state._names.area === area.id) return state._names.list;
+  let list = [];
+  try { const r = await fetch('data/labels/' + area.id + '.json'); if (r.ok) list = (await r.json()).labels || []; } catch (e) { }
+  state._names = { area: area.id, list };
+  return list;
+}
+async function renderNames() {
+  nameLayer.clearLayers();
+  if (!state.area || !state.show.gsinames) return;
+  const z = map.getZoom(); if (z < 13) return;
+  const list = await loadNames(state.area);
+  const vb = map.getBounds().pad(0.1), osm = (state._pois && state._pois.data && state._pois.data.labels) || [];
+  const drawn = [];
+  list.forEach(l => {
+    if (!vb.contains([l.lat, l.lon])) return;
+    // the same name printed twice close together (long valleys, big snowfields): label it once
+    if (drawn.some(d => d.ja === l.ja && Math.abs(d.lat - l.lat) < 0.006 && Math.abs(d.lon - l.lon) < 0.008)) return;
+    drawn.push(l);
+    const natural = !!NAME_COL[l.k];
+    if (!natural && z < 15 && l.k !== 'place' && l.k !== 'town') return;
+    // English already shown from OpenStreetMap for this one? skip it
+    if (osm.some(o => o.ja && (o.ja === l.ja || o.ja.includes(l.ja)) && Math.abs(o.lat - l.lat) < 0.004 && Math.abs(o.lon - l.lon) < 0.005)) return;
+    const col = NAME_COL[l.k] || '#334155';
+    const html = '<div class="gsi-name" style="color:' + col + '">' + esc(l.en) + (l.g ? '<span> ' + esc(l.g) + '</span>' : '') + '</div>';
+    const m = L.marker([l.lat, l.lon], { icon: L.divIcon({ className: '', iconSize: [0, 0], iconAnchor: [0, -9], html }), keyboard: false });
+    m.bindPopup('<b>' + esc(l.en) + '</b>' + (l.g ? ' <span class="muted">(' + esc(l.g) + ')</span>' : '') + '<br><span lang="ja" style="font-size:16px">' + esc(l.ja) + '</span>' +
+      '<br><span class="small muted">Name on the GSI topo map. The reading is approximate; show rescuers the Japanese.</span>');
+    nameLayer.addLayer(m);
+  });
+}
+
 async function renderPois() {
   poiLayer.clearLayers();
   if (!state.area || map.getZoom() < 11) return;
@@ -716,6 +756,7 @@ async function downloadPack(area, maxZ, onProgress) {
   await Promise.all(Array.from({ length: 6 }, worker));
   if (failed > jobs.length * 0.2) throw new Error('Lost connection part way. Tap Download again to finish; tiles already saved are kept.');
 
+  try { await cache.add('data/labels/' + area.id + '.json'); } catch (e) { } // English for the topo map's names
   // Names, lifts, onsens, parking... (also loads on its own when you browse an area with signal)
   try { const json = await savePlaces(area, await fetchPlaces(area)); bytes += json.length; state._pois = null; } catch (e) { /* places are a nice-to-have */ }
   done++; onProgress(done / total, bytes);
@@ -937,7 +978,7 @@ function showLayers() {
   if (eff === 'danger') h += '<div class="legend"><span><span class="sw" style="background:rgba(214,18,36,.6)"></span><b>Red: stay off.</b> Steep slopes the bulletin rates dangerous for their height and aspect.</span><span><span class="sw" style="background:rgba(247,148,30,.45)"></span><b>Amber: only with good reason</b>, one at a time, and a way out.</span><span class="muted">Ground below the shading (gullies, runouts) can still be hit by slides from above.</span></div>';
   else if (eff === 'slope') h += '<div class="legend"><span><span class="sw" style="background:rgb(250,225,0)"></span>27–29°</span><span><span class="sw" style="background:rgb(247,148,30)"></span>30–34°</span><span><span class="sw" style="background:rgb(226,32,40)"></span>35–39°</span><span><span class="sw" style="background:rgb(140,40,170)"></span>40–44°</span><span><span class="sw" style="background:rgb(40,30,50)"></span>45° and steeper</span><span class="muted">Most slab avalanches start on 30–45° slopes.</span></div>';
   h += aspectHtml;
-  h += '<div class="field"><span class="lbl">Show</span>' + tog('recent', 'Recent avalanches (black pins)') + tog('path', 'Known slide paths and incidents (red skulls)') + tog('hazard', 'Hazard and handy markers') + tog('wild', '♨ Natural mountain onsens') + tog('onsen', '♨ Onsens (town baths)') + tog('parking', 'Parking (zoom in to see)') + tog('labels', 'English place names and ski resorts') + tog('lifts', 'Lifts and ski runs') + tog('hut', 'Huts and lift stations') + tog('shop', 'Konbini, medical, koban') + '</div>';
+  h += '<div class="field"><span class="lbl">Show</span>' + tog('recent', 'Recent avalanches (black pins)') + tog('path', 'Known slide paths and incidents (red skulls)') + tog('hazard', 'Hazard and handy markers') + tog('wild', '♨ Natural mountain onsens') + tog('onsen', '♨ Onsens (town baths)') + tog('parking', 'Parking (zoom in to see)') + tog('labels', 'English place names and ski resorts') + tog('gsinames', 'English for the topo map\'s Japanese names (valleys, creeks, ridges…)') + tog('lifts', 'Lifts and ski runs') + tog('hut', 'Huts and lift stations') + tog('shop', 'Konbini, medical, koban') + '</div>';
   h += '<details class="glossary"><summary>Japanese map words</summary><p class="small muted">The topo map\'s own text is Japanese and can\'t be translated in place. These endings tell you what a name is.</p><dl class="kv small">' +
     [['岳 / 山 / 峰', 'dake / yama / mine: peak, mountain'], ['尾根', 'one: ridge'], ['沢', 'sawa: gully, creek'], ['谷', 'tani / dani: valley'], ['峠 / 乗越', 'tōge / nokkoshi: pass, col'], ['頭', 'atama / kashira: knoll, top'], ['平 / 原', 'taira / hara: flat, plateau'], ['池 / 湖', 'ike / ko: pond, lake'], ['滝', 'taki: waterfall'], ['川', 'kawa / gawa: river'], ['温泉', 'onsen: hot spring'], ['小屋', 'koya: hut'], ['登山口', 'tozanguchi: trailhead'], ['駐車場', 'chūshajō: parking'], ['スキー場', 'sukījō: ski area'], ['ゲート', 'gēto: backcountry gate'], ['雪崩', 'nadare: avalanche'], ['立入禁止', 'tachiiri kinshi: no entry']]
       .map(([j, e]) => '<dt lang="ja">' + j + '</dt><dd>' + e + '</dd>').join('') + '</dl></details>';
@@ -955,7 +996,7 @@ function showLayers() {
     else redrawShading();
     showLayers();
   });
-  $('#sheetBody').querySelectorAll('[data-show]').forEach(cb => cb.onchange = () => { state.show[cb.dataset.show] = cb.checked; store.set('show', state.show); renderPins(); renderPois(); });
+  $('#sheetBody').querySelectorAll('[data-show]').forEach(cb => cb.onchange = () => { state.show[cb.dataset.show] = cb.checked; store.set('show', state.show); renderPins(); renderPois(); renderNames(); });
 }
 
 // Make sure the compass button exists even if an older saved page is showing.
@@ -1001,7 +1042,7 @@ function setArea(id, fly) {
   state.area = a; store.set('area', a.id);
   $('#areaName').textContent = a.name; $('#areaNameJa').textContent = a.nameJa || '';
   if (fly) map.fitBounds(a.bounds, { padding: [10, 10] });
-  updateChip(); updateNativeZoom(); redrawShading(); state._pois = null; renderPois(); drawOutline();
+  updateChip(); updateNativeZoom(); redrawShading(); state._pois = null; renderPois(); drawOutline(); drawOutlineNames();
   if (changed && state.base === 'sat') { sat.loadedFor = null; ensureSat(); }
 }
 
@@ -1123,7 +1164,7 @@ $('#locateBtn').addEventListener('click', () => {
 });
 async function onFix(pos) {
   const { latitude: lat, longitude: lon, accuracy } = pos.coords;
-  state.me = [lat, lon];
+  state.me = [lat, lon]; state.meAt = Date.now(); state.meAcc = accuracy; state.meAlt = pos.coords.altitude;
   if (!meMarker) {
     meMarker = L.marker([lat, lon], { icon: L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: '<div class="me-dot"></div>' }), interactive: false });
     meCircle = L.circle([lat, lon], { radius: accuracy, color: '#2b7fd0', weight: 1, fillOpacity: .08, interactive: false });
@@ -1467,6 +1508,9 @@ function showHelp() {
     row(btnSvg('packsBtn'), 'Download', 'Save areas for offline use.') +
     row(btnSvg('locateBtn'), 'My position', 'GPS dot plus your height, slope, aspect and the danger rating where you stand. Works without mobile signal.') +
     row(btnSvg('addBtn'), 'Drop a pin', 'Report a slide, mark a slide path, or drop a hazard / handy marker. Or long-press the map.', 'red') +
+    row(btnSvg('dataBtn'), 'Refresh (left side)', 'Gets today\'s avalanche report and riders\' new hazards, pins and tracks. Not an app update.') +
+    row('<b style="color:#c8102e;font-size:12px">SOS</b>', 'SOS (bottom left)', 'Your exact position, height and nearby place names in Japanese and English, the numbers to call (110 / 119) and a Japanese message to read out. Works without signal.') +
+    row('<b style="font-size:11px">Key</b>', 'Key (left side)', 'What the symbols and lines on the map mean.') +
     row(btnSvg('settingsBtn'), 'Settings', 'Your name, share pins with mates, recent-avalanche time frame, backup, snow-zone heights.') + '</div>';
   h += '<div class="stack"><p class="eyebrow">What the colours mean</p><div class="legend">' +
     '<span><span class="sw" style="background:rgba(214,18,36,.6)"></span><b>Red shading:</b> stay off today</span>' +
@@ -1495,7 +1539,7 @@ $('#settingsBtn').addEventListener('click', showSettings);
 map.on('zoomend', () => updateSatFlag());
 map.on('moveend', () => {
   if (!state.area) return;
-  renderPois(); const c = map.getCenter();
+  renderPois(); renderNames(); const c = map.getCenter();
   if (!boxing) { const a = areaFor(c.lat, c.lng); if (a && a.id !== state.area.id && map.getZoom() >= 11) setArea(a.id); }
   store.set('view', [c.lat, c.lng, map.getZoom()]);
 });
@@ -1597,6 +1641,96 @@ function toggleKey(open) {
   p.hidden = !open; b.setAttribute('aria-expanded', open); b.classList.toggle('on', open);
 }
 $('#keyBtn').addEventListener('click', () => toggleKey());
+
+/* ------------------------------------------------------------------ emergency: where am I
+   Works with no signal (GPS + saved map data). Gives coordinates, height, nearby named places in Japanese and
+   English, the numbers to call, and a Japanese message to read out or show. */
+const DIR_EN = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+const DIR_JA = ['北', '北北東', '北東', '東北東', '東', '東南東', '南東', '南南東', '南', '南南西', '南西', '西南西', '西', '西北西', '北西', '北北西'];
+function bearingIdx(from, to) {
+  const r = Math.PI / 180, y = Math.sin((to[1] - from[1]) * r) * Math.cos(to[0] * r), x = Math.cos(from[0] * r) * Math.sin(to[0] * r) - Math.sin(from[0] * r) * Math.cos(to[0] * r) * Math.cos((to[1] - from[1]) * r);
+  return Math.round(((Math.atan2(y, x) / r + 360) % 360) / 22.5) % 16;
+}
+const dms = (v, pos, neg) => { const a = Math.abs(v), d = Math.floor(a), m = Math.floor((a - d) * 60), s = ((a - d) * 60 - m) * 60; return d + '°' + String(m).padStart(2, '0') + '′' + s.toFixed(1).padStart(4, '0') + '″' + (v >= 0 ? pos : neg); };
+const dmsJa = (v) => { const a = Math.abs(v), d = Math.floor(a), m = Math.floor((a - d) * 60), s = ((a - d) * 60 - m) * 60; return d + '度' + m + '分' + s.toFixed(1) + '秒'; };
+function fixNow() {
+  return new Promise(res => {
+    if (state.me && state.meAt && Date.now() - state.meAt < 120000) return res({ lat: state.me[0], lon: state.me[1], acc: state.meAcc, alt: state.meAlt });
+    if (!navigator.geolocation) return res(null);
+    navigator.geolocation.getCurrentPosition(p => res({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, alt: p.coords.altitude }), () => res(null), { enableHighAccuracy: true, timeout: 25000, maximumAge: 60000 });
+  });
+}
+async function nearbyNames(lat, lon) {
+  const area = areaFor(lat, lon) || state.area;
+  const names = area ? await loadNames(area) : [];
+  const osm = ((await loadPois(area).catch(() => null)) || {}).labels || [];
+  const pool = names.filter(n => ['water', 'river', 'waterfall', 'lake', 'peak', 'pass', 'terrain', 'plateau', 'place', 'town', 'onsen'].includes(n.k))
+    .map(n => ({ ja: n.ja, en: n.en + (n.g ? ' (' + n.g + ')' : ''), k: n.k, lat: n.lat, lon: n.lon }))
+    .concat(osm.filter(o => ['peak', 'resort', 'saddle', 'place', 'station'].includes(o.c)).map(o => ({ ja: o.ja || o.name, en: englishFor(o), k: o.c === 'resort' ? 'resort' : o.c === 'saddle' ? 'pass' : o.c, lat: o.lat, lon: o.lon })));
+  const d = x => map.distance([lat, lon], [x.lat, x.lon]);
+  const pick = kinds => pool.filter(x => kinds.includes(x.k)).sort((a, b) => d(a) - d(b))[0];
+  const out = [pick(['water', 'river', 'waterfall', 'lake']), pick(['peak', 'pass', 'terrain', 'plateau']), pick(['resort', 'place', 'town', 'station', 'onsen'])].filter(Boolean);
+  return out.map(x => ({ ...x, dist: d(x), b: bearingIdx([x.lat, x.lon], [lat, lon]) }));
+}
+const kmTxt = m => m < 1000 ? Math.round(m / 10) * 10 + ' m' : (m / 1000).toFixed(1) + ' km';
+async function showRescue() {
+  openSheet('Emergency: where am I', '<p style="margin:0">Getting your GPS position… (works without signal; can take a minute in the trees)</p>', { view: 'rescue', tall: true });
+  const f = await fixNow();
+  if (state.view !== 'rescue') return;
+  if (!f) { openSheet('Emergency: where am I', '<p style="margin:0">Couldn\'t get a GPS position. Move to open ground, check location is allowed for this app, and try again.</p>' + callHtml() + '<button class="btn" id="rsAgain">Try again</button>', { view: 'rescue', tall: true }); $('#rsAgain').onclick = showRescue; wireCall(); return; }
+  const t = await terrainAt(f.lat, f.lon).catch(() => null);
+  const ele = t ? Math.round(t.elev) : (f.alt != null ? Math.round(f.alt) : null);
+  const near = await nearbyNames(f.lat, f.lon);
+  const nearJa = near.map(n => n.ja + 'の' + DIR_JA[n.b] + ' 約' + kmTxt(n.dist)).join('、');
+  const nearEn = near.map(n => kmTxt(n.dist) + ' ' + DIR_EN[n.b] + ' of ' + n.en + ' (' + n.ja + ')').join('; ');
+  const area = areaFor(f.lat, f.lon);
+  const ja = '山で遭難しました。救助をお願いします。\n場所：北緯 ' + dmsJa(f.lat) + '、東経 ' + dmsJa(f.lon) + '（' + f.lat.toFixed(5) + ', ' + f.lon.toFixed(5) + '）' + (ele ? '\n標高：約 ' + ele + ' m' : '') + (nearJa ? '\n目印：' + nearJa : '') + (area ? '\n地域：' + (area.nameJa || area.name) : '') + '\n人数：　人　　けが：あり ／ なし';
+  const en = 'Mountain emergency, we need rescue.\nPosition: ' + f.lat.toFixed(5) + ', ' + f.lon.toFixed(5) + ' (' + dms(f.lat, 'N', 'S') + ' ' + dms(f.lon, 'E', 'W') + ')' + (ele ? '\nElevation: about ' + ele + ' m' : '') + (nearEn ? '\nNear: ' + nearEn : '') + (area ? '\nArea: ' + area.name : '') + '\nPeople:    Injured: yes / no';
+  const gm = 'https://maps.google.com/?q=' + f.lat.toFixed(5) + ',' + f.lon.toFixed(5);
+  const h = '<div class="rescue-coords"><div class="big">' + f.lat.toFixed(5) + ', ' + f.lon.toFixed(5) + '</div><div>' + dms(f.lat, 'N', 'S') + ' &nbsp; ' + dms(f.lon, 'E', 'W') + '</div>' +
+    '<div class="small muted">' + (ele ? 'Elevation about <b>' + ele + ' m</b> · ' : '') + 'GPS accuracy ±' + Math.round(f.acc || 0) + ' m</div></div>' +
+    (near.length ? '<div class="stack"><p class="eyebrow">Nearest named places</p>' + near.map(n => '<div class="small"><b>' + kmTxt(n.dist) + ' ' + DIR_EN[n.b] + '</b> of ' + esc(n.en) + ' <span lang="ja">' + esc(n.ja) + '</span></div>').join('') + '</div>' : '') +
+    callHtml() +
+    '<div class="stack"><p class="eyebrow">Read this out, or show it (Japanese)</p><pre class="rescue-msg" lang="ja">' + esc(ja) + '</pre></div>' +
+    '<details class="small"><summary>English version</summary><pre class="rescue-msg">' + esc(en) + '</pre></details>' +
+    '<div class="btn-row"><button class="btn primary" id="rsShare">Send my location</button><button class="btn" id="rsCopy">Copy message</button></div>' +
+    '<button class="btn" id="rsAgain">Update position</button>' +
+    '<p class="small muted" style="margin:0">If you can, stay where you are and keep warm. Save battery: lower brightness, close other apps, and keep the phone inside your jacket.</p>';
+  openSheet('Emergency: where am I', h, { view: 'rescue', tall: true });
+  wireCall();
+  const text = ja + '\n\n' + en + '\n' + gm;
+  $('#rsCopy').onclick = async () => { try { await navigator.clipboard.writeText(text); toast('Copied'); } catch (e) { toast('Long-press the text to copy it'); } };
+  $('#rsShare').onclick = async () => { if (navigator.share) { try { await navigator.share({ title: 'My location (mountain emergency)', text: text }); return; } catch (e) { if (e && e.name === 'AbortError') return; } } try { await navigator.clipboard.writeText(text); toast('Copied. Paste it into a message.'); } catch (e) { } };
+  $('#rsAgain').onclick = () => { state.meAt = 0; showRescue(); };
+}
+function callHtml() {
+  return '<div class="stack"><p class="eyebrow">Call for help</p><div class="btn-row"><a class="btn danger call" href="tel:110">Call 110<br><span>Police · mountain rescue</span></a><a class="btn danger call" href="tel:119">Call 119<br><span>Fire · ambulance</span></a></div>' +
+    '<p class="small muted" style="margin:0">Say <b>"sangaku sōnan"</b> (mountain accident). If they only speak Japanese, read out or show the message below. If you have no signal, try higher ground or send a message instead; texts can slip through when calls can\'t.</p></div>';
+}
+function wireCall() { }
+$('#sosBtn').addEventListener('click', showRescue);
+
+/* ------------------------------------------------------------------ data refresh button (left side)
+   Just the live data, not an app update: today's avalanche report and riders' pins, markers and tracks. */
+async function refreshData() {
+  const b = $('#dataBtn');
+  if (!navigator.onLine) { toast('No signal. Showing what\'s saved on this phone.'); return; }
+  if (b.classList.contains('spin')) return;
+  b.classList.add('spin');
+  let got = 0, err = '';
+  const before = JSON.stringify((state.bulletins || {}).regions || {}).length;
+  try {
+    const [, r] = await Promise.all([loadBulletins(true), window.powderSync ? powderSync.syncQuiet() : Promise.resolve({})]);
+    if (r && r.got) got = r.got; if (r && r.err) err = r.err;
+  } catch (e) { err = 'try again'; }
+  b.classList.remove('spin');
+  const reg = state.area && regionBulletin(state.area.region);
+  const brief = reg && reg.issued ? 'avalanche report ' + fmtDate(reg.issued) : reg && reg.status === 'off-season' ? 'avalanche report (off season)' : 'avalanche report';
+  store.set('dataRefreshed', new Date().toISOString());
+  toast('Updated: ' + brief + (got ? ' · ' + got + ' new or changed from riders' : ' · riders\' pins up to date') + (err ? ' (sync: ' + err + ')' : ''), 3500);
+  if (state.view === 'brief') { closeSheet(); }
+}
+$('#dataBtn').addEventListener('click', refreshData);
 
 async function boot() {
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { }

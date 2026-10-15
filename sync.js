@@ -190,8 +190,9 @@
 
   /* ---------- when to sync ---------- */
   async function sync(manual) {
-    if (!ready() || S.busy || (!S.on && !S.backup)) return;
-    if (!navigator.onLine) { if (manual) toast('No signal. It will sync when you are back in range.'); return; }
+    if (!ready() || S.busy || (!S.on && !S.backup)) return { skipped: true };
+    if (!navigator.onLine) { if (manual === true) toast('No signal. It will sync when you are back in range.'); return { offline: true }; }
+    let result = {};
     S.busy = true; S.err = ''; paint();
     try {
       await token();
@@ -199,15 +200,18 @@
       const got = S.on ? await pull() : 0;
       if (S.backup) { S.lastBackup = new Date().toISOString(); store.set('lastBackup', S.lastBackup); }
       S.last = new Date().toISOString(); store.set('syncLast', S.last);
-      if (manual) toast('Synced' + (sent ? ' · sent ' + sent : '') + (got ? ' · ' + got + ' new or updated' : ''));
-      else if (got) toast(got + ' new or updated from other riders', 2500);
+      result = { sent, got };
+      if (manual === true) toast('Synced' + (sent ? ' · sent ' + sent : '') + (got ? ' · ' + got + ' new or updated' : ''));
+      else if (got && manual !== 'quiet') toast(got + ' new or updated from other riders', 2500);
     } catch (e) {
       S.err = String(e.message || e);
       if (/sign-in|40[13]/.test(S.err)) { S.auth = null; store.set('syncAuth', null); }
-      if (manual) toast('Sync didn\'t work: ' + S.err);
+      if (manual === true) toast('Sync didn\'t work: ' + S.err);
+      result = { err: S.err };
     }
     S.busy = false; paint();
     if (S.again) { S.again = false; soon(); } // something changed while we were syncing
+    return result;
   }
   function soon(ms = 3000) { if (!ready() || (!S.on && !S.backup)) return; if (S.busy) { S.again = true; return; } clearTimeout(S.timer); S.timer = setTimeout(() => sync(false), ms); }
   // Saving pins anywhere in the app (new marker, edit, check, delete) syncs a few seconds later.
@@ -391,5 +395,5 @@
   }
   init();
 
-  window.powderSync = { html, wire, soon, sync: () => sync(true), crew: () => S.crew, joinFromText, restore, deleted() { soon(); }, _S: S };
+  window.powderSync = { html, wire, soon, sync: () => sync(true), syncQuiet: () => sync('quiet'), crew: () => S.crew, joinFromText, restore, deleted() { soon(); }, _S: S };
 })();
