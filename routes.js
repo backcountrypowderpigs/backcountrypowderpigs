@@ -24,7 +24,7 @@
   const GLOW = { steep: '#f59e0b', vsteep: '#ef4444', boot: '#7c3aed' };
   const routeLayer = L.layerGroup().addTo(map);
   const liveLayer = L.layerGroup().addTo(map);
-  const save = () => { store.set('routes', routes); store.set('routesVisible', [...visible]); };
+  const save = () => { store.set('routes', routes); store.set('routesVisible', [...visible]); if (window.powderSync) powderSync.soon(); };
 
   /* ---------- maths ---------- */
   const R = 6371000;
@@ -444,13 +444,18 @@
 
   /* ---------- sheets ---------- */
   function openRoutes() {
-    const plans = routes.filter(r => r.type === 'plan'), tracks = routes.filter(r => r.type === 'track' && !r.pending);
-    const item = r => '<div class="list-item route-item" data-open="' + r.id + '"><span class="swatch ' + r.type + '"></span><span><span class="t">' + esc(r.name) + '</span><br><span class="s">' + fmtKm(r.stats.dist || 0) + ' · ↑ ' + (r.stats.gain || 0) + ' m' + (r.type === 'track' ? ' · ' + fmtDur(r.stats.time || 0) : r.stats.est ? ' · ~' + fmtDur(r.stats.est) : '') + ' · ' + fmtDate(r.created) + '</span></span>' +
+    const own = routes.filter(r => !r.synced);
+    const plans = own.filter(r => r.type === 'plan'), tracks = own.filter(r => r.type === 'track' && !r.pending);
+    const crewR = routes.filter(r => r.synced === 'crew'), pubR = routes.filter(r => r.synced === 'all');
+    const shareTag = r => { if (r.synced) return r.from ? ' · from ' + r.from : ''; const w = shareOf(r); return w === 'crew' ? ' · crew' : w === 'all' ? ' · public' : ''; };
+    const item = r => '<div class="list-item route-item" data-open="' + r.id + '"><span class="swatch ' + r.type + '"></span><span><span class="t">' + esc(r.name) + '</span><br><span class="s">' + fmtKm(r.stats.dist || 0) + ' · ↑ ' + (r.stats.gain || 0) + ' m' + (r.type === 'track' ? ' · ' + fmtDur(r.stats.time || 0) : r.stats.est ? ' · ~' + fmtDur(r.stats.est) : '') + shareTag(r) + ' · ' + fmtDate(r.created) + '</span></span>' +
       '<label class="vis" title="Show on map"><input type="checkbox" data-vis="' + r.id + '"' + (visible.has(r.id) ? ' checked' : '') + '> Show</label></div>';
     let h = '<div class="btn-row"><button class="btn primary" id="goPlan">Plan a route</button><button class="btn" id="goRec">' + (rec ? 'Back to recording' : '● Record a track') + '</button></div>' +
       '<div class="legend small"><span><span class="sw" style="background:repeating-linear-gradient(90deg,' + PLAN_COL + ' 0 8px,transparent 8px 12px);border:0"></span>Planned route</span><span><span class="sw" style="background:' + TRACK_COL + ';border:0"></span>Recorded track</span></div>';
     h += '<div class="stack"><p class="eyebrow">Planned routes</p>' + (plans.length ? '<div class="list">' + plans.map(item).join('') + '</div>' : '<p class="small muted" style="margin:0">None yet. Plan one, or import a GPX file.</p>') + '</div>';
     h += '<div class="stack"><p class="eyebrow">Recorded tracks</p>' + (tracks.length ? '<div class="list">' + tracks.map(item).join('') + '</div>' : '<p class="small muted" style="margin:0">None yet.</p>') + '</div>';
+    if (crewR.length) h += '<div class="stack"><p class="eyebrow">From your crew</p><div class="list">' + crewR.map(item).join('') + '</div></div>';
+    if (pubR.length) h += '<div class="stack"><p class="eyebrow">Shared by other riders</p><div class="list">' + pubR.map(item).join('') + '</div></div>';
     if (plans.length || tracks.length || state.pins.length) h += '<button class="btn" id="shareMany">Send routes and markers to a mate…</button>';
     h += '<button class="btn" id="gpxImport">Import GPX (from a mate, CalTopo, Gaia…)</button><input type="file" id="gpxFile" accept=".gpx,application/gpx+xml,application/xml,text/xml" hidden>';
     openSheet('Routes and tracks', h, { view: 'routes', tall: true });
@@ -474,11 +479,25 @@
     if (r.pending) h += '<div class="card"><b>Keep this track?</b><span class="small muted">Name it and keep it, or throw it away.</span></div>';
     h += '<div class="field"><label for="rName">Name</label><input type="text" id="rName" maxlength="60" value="' + esc(r.name) + '"></div>';
     h += statsHtml(r) + profileSvg(r.stats.profile, r.type === 'plan' ? r.stats.segs : null);
+    if (r.synced) h += '<p class="small muted" style="margin:0">' + (r.synced === 'crew' ? 'Shared by your crew' : 'Shared publicly') + (r.from ? ' by <b>' + esc(r.from) + '</b>' : '') + '. Only they can change it.</p>';
+    else if (!r.pending && !r.from) {
+      const w = shareOf(r), crew = window.powderSync && powderSync.crew();
+      h += '<div class="field"><span class="lbl">Who can see it</span><div class="seg" id="rWho">' + [['me', 'Just me'], ['crew', crew ? 'My crew' : 'My crew…'], ['all', 'Everyone']].map(([v, l]) => '<button type="button" data-v="' + v + '" class="' + (w === v ? 'on' : '') + '">' + l + '</button>').join('') + '</div>' +
+        '<span class="help">' + (crew ? 'Crew: ' + esc(crew.name) + '. ' : 'Set up a crew in Settings to share with just your friends. ') + 'Shared routes update on their phones whenever you have signal.</span></div>';
+    }
     h += '<div class="btn-row">' + (r.pending ? '<button class="btn primary" id="rKeep">Keep</button><button class="btn" id="rDiscard">Discard</button>'
-      : '<button class="btn primary" id="rLink">Send to a mate</button><button class="btn" id="rShare">GPX file</button>' + (r.type === 'plan' ? '<button class="btn" id="rEdit">Edit line</button>' : '') + '<button class="btn" id="rDel">Delete</button>') + '</div>';
+      : '<button class="btn primary" id="rLink">Send to a mate</button><button class="btn" id="rShare">GPX file</button>' + (r.type === 'plan' && !r.synced ? '<button class="btn" id="rEdit">Edit line</button>' : '') + '<button class="btn" id="rDel">' + (r.synced ? 'Remove from my phone' : 'Delete') + '</button>') + '</div>';
     if (r.pending) h += '<button class="btn small ghost" id="rShare">Share GPX</button>';
     openSheet(r.type === 'plan' ? 'Planned route' : 'Recorded track', h, { view: 'route' });
     const nameEl = $('#rName'); nameEl.onchange = () => { r.name = nameEl.value.trim() || r.name; save(); };
+    if (r.synced) nameEl.readOnly = true;
+    const who = $('#rWho'); if (who) who.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.v === 'crew' && !(window.powderSync && powderSync.crew())) { toast('Set up or join a crew first'); if (window.showSettings) showSettings(); return; }
+      r.share = b.dataset.v; save(); who.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+      toast(r.share === 'me' ? 'Just you' : r.share === 'crew' ? 'Shared with your crew' : 'Shared with everyone');
+      if (window.powderSync) powderSync.soon();
+    });
     const keep = $('#rKeep'); if (keep) keep.onclick = () => { r.name = nameEl.value.trim() || r.name; delete r.pending; save(); toast('Track kept'); openRoutes(); };
     const disc = $('#rDiscard'); if (disc) disc.onclick = () => { removeRoute(r.id); toast('Track discarded'); closeSheet(); };
     const sh = $('#rShare'); if (sh) sh.onclick = () => shareGpx(r);
@@ -486,11 +505,35 @@
     const ed = $('#rEdit'); if (ed) ed.onclick = () => startPlan(r);
     const del = $('#rDel'); if (del) del.onclick = () => {
       if (!del.dataset.armed) { del.dataset.armed = '1'; del.textContent = 'Tap again to delete'; del.classList.add('danger'); return; }
-      removeRoute(r.id); toast('Deleted'); openRoutes();
+      if (r.synced) { const hid = store.get('hiddenRoutes', []); hid.push(r.id); store.set('hiddenRoutes', hid.slice(-500)); }
+      removeRoute(r.id); toast(r.synced ? 'Removed from your phone' : 'Deleted'); openRoutes();
     };
     if (fresh && r.type === 'plan') toast('Route saved');
   }
-  function removeRoute(id) { const i = routes.findIndex(x => x.id === id); if (i >= 0) routes.splice(i, 1); visible.delete(id); save(); drawSaved(); }
+  function removeRoute(id) { const i = routes.findIndex(x => x.id === id); if (i >= 0) routes.splice(i, 1); visible.delete(id); save(); drawSaved(); if (window.powderSync) powderSync.soon(); }
+  // Who sees one of my routes: set per route; new routes go to your crew by default once you're in one.
+  function shareOf(r) {
+    if (r.synced || r.from) return 'me';
+    if (r.share) return r.share;
+    const c = window.powderSync && powderSync.crew();
+    return c && (r.created || '') >= (c.joinedAt || '') ? 'crew' : 'me';
+  }
+  // Routes that arrive by live sync (crew or public). Upsert by id; public ones start hidden so the map doesn't fill up.
+  async function upsertSynced(x, scope) {
+    if (!x || !x.id || x.pts.length < 2 || store.get('hiddenRoutes', []).includes(x.id)) return false;
+    const old = routes.find(r => r.id === x.id);
+    if (old && !old.synced) return false; // never overwrite one of mine
+    const type = x.type === 'track' ? 'track' : 'plan';
+    const r = { id: x.id, type, name: String(x.name || 'Shared route').slice(0, 60), created: x.created || new Date().toISOString(), from: String(x.from || '').slice(0, 40), synced: scope,
+      pts: type === 'plan' ? x.pts.map(p => [p[0], p[1]]) : x.pts };
+    if (old && old.name === r.name && old.pts.length === r.pts.length) return false;
+    r.stats = type === 'plan' ? lean(await analyseLine(r.pts)) : trackStats(r.pts);
+    if (type === 'track' && Array.isArray(x.sentStats)) ['dist', 'gain', 'loss', 'time', 'moving'].forEach((k, i) => { const v = Number(x.sentStats[i]); if (isFinite(v) && v >= 0) r.stats[k] = v; });
+    if (old) Object.assign(old, r); else { routes.push(r); if (scope === 'crew') visible.add(r.id); }
+    save(); drawSaved();
+    return true;
+  }
+  function removeSynced(id) { const r = routes.find(x => x.id === id); if (r && r.synced) { removeRoute(id); return true; } return false; }
 
   /* ---------- GPX ---------- */
   function toGpx(r) {
@@ -554,5 +597,5 @@
     routes.unshift(r); visible.add(r.id); save(); drawSaved();
     return true;
   }
-  window.powderRoutes = { openRoutes, startPlan, startRec, openRoute, addShared, all: () => routes, fmtKm };
+  window.powderRoutes = { openRoutes, startPlan, startRec, openRoute, addShared, upsertSynced, removeSynced, shareOf, all: () => routes, fmtKm };
 })();

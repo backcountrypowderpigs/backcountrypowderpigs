@@ -1,26 +1,29 @@
-/* Live sync for Backcountry Powder Pigs: everyone's slide reports, slide paths, hazard markers and checks,
-   shared through one free Google Firebase (Firestore) database. Works like this:
-   - Each phone signs in anonymously (no account, no email). That gives it an id the database uses to make sure
-     only you can change or delete your own pins.
-   - With signal or Wi-Fi, the phone sends what changed on it and fetches what changed for everyone since last time.
-     With no signal it just waits: everything still works from the phone, and it catches up when you're back in range.
-   - Routes and tracks stay private. Send those with a link.
-   Settings live in data/sync.json (Firebase web API key and project id; both are public by design). */
+/* Live sync for Backcountry Powder Pigs, through one free Google Firebase (Firestore) database.
+   - Public, to everyone using the app: slide reports, slide paths, hazard markers, checks, and any route or track
+     its owner marks "Everyone".
+   - Crew only (friends who share a crew code): good-snow markers, and routes and tracks marked "My crew"
+     (new ones go to the crew by default once you're in one).
+   - Each phone signs in anonymously (no account, no email). The database rules only let a phone change or delete its own things.
+   - With signal or Wi-Fi the phone sends what changed and fetches what changed since last time. No signal: it waits
+     and catches up later; everything keeps working from the phone.
+   Settings: data/sync.json (Firebase web API key and project id, public by design). Rules: firestore.rules. */
 'use strict';
 (function () {
   const S = {
     cfg: null, on: store.get('syncOn', true), busy: false, timer: null, last: store.get('syncLast', null), err: '',
-    auth: store.get('syncAuth', null),          // { uid, idToken, refreshToken, exp }
-    cursor: store.get('syncCursor', { pins: null, checks: null }),
-    pushed: store.get('syncPushed', {}),         // pin id -> updatedAt we last sent
-    pushedChecks: store.get('syncPushedChecks', {}), // pin id -> my check time we last sent
-    tomb: store.get('syncTomb', {}),             // deleted pin id -> time (still to send)
-    owners: store.get('syncOwners', {}),         // pin id -> owner uid (pins that came from the cloud)
+    auth: store.get('syncAuth', null),              // { uid, idToken, refreshToken, exp }
+    crew: store.get('crew', null),                  // { code, name, joinedAt }
+    cursor: store.get('syncCursors', {}),           // collection path -> last serverAt seen
+    pushed: store.get('syncPushed2', {}),           // doc path -> version key we last sent (live docs only)
+    pushedChecks: store.get('syncPushedChecks', {}),// pin id -> my check time we last sent
+    crewPins: store.get('crewPins', []),            // pin ids that came from the crew
   };
-  const persist = () => { store.set('syncPushed', S.pushed); store.set('syncPushedChecks', S.pushedChecks); store.set('syncTomb', S.tomb); store.set('syncCursor', S.cursor); store.set('syncOwners', S.owners); };
+  const persist = () => { store.set('syncPushed2', S.pushed); store.set('syncPushedChecks', S.pushedChecks); store.set('syncCursors', S.cursor); store.set('crewPins', S.crewPins); };
   const ready = () => !!(S.cfg && S.cfg.apiKey && S.cfg.projectId);
-  const docs = () => 'https://firestore.googleapis.com/v1/projects/' + S.cfg.projectId + '/databases/(default)/documents';
-  const docName = (col, id) => 'projects/' + S.cfg.projectId + '/databases/(default)/documents/' + col + '/' + id;
+  const root = () => 'projects/' + S.cfg.projectId + '/databases/(default)/documents';
+  const api = () => 'https://firestore.googleapis.com/v1/' + root();
+  const crewPath = () => S.crew ? 'crews/' + S.crew.code + '/items' : null;
+  const BASE = location.origin + location.pathname;
 
   /* ---------- anonymous sign-in ---------- */
   async function token() {
@@ -39,89 +42,128 @@
     return S.auth.idToken;
   }
 
-  /* ---------- push: my pins, my deletions, my checks on other people's pins ---------- */
+  /* ---------- what should be in the database from this phone ---------- */
   const mine = p => p.source === 'user' && p.deviceId === deviceId;
-  function pendingWrites() {
-    const w = [], pinIds = [], checkIds = [], tombIds = [];
+  const isCrewPin = p => p.kind === 'hazard' && p.htype === 'goodsnow';
+  function wanted() {
+    const want = {}; // doc path -> { key, fields }
+    const doc = (path, json, key, kind) => {
+      const f = { json: { stringValue: json }, uid: { stringValue: S.auth.uid }, deleted: { booleanValue: false } };
+      if (kind) f.kind = { stringValue: kind };
+      want[path] = { key: (kind ? kind + '#' : '') + key, fields: f };
+    };
     state.pins.filter(mine).forEach(p => {
-      const ver = p.updatedAt || p.createdAt || '1';
-      const vKey = ver + '|' + JSON.stringify(p.verifications || {}).length;
-      if (S.pushed[p.id] === vKey) return;
-      w.push({ update: { name: docName('pins', p.id), fields: { json: { stringValue: JSON.stringify(p) }, uid: { stringValue: S.auth.uid }, deleted: { booleanValue: false } } }, updateTransforms: [{ fieldPath: 'serverAt', setToServerValue: 'REQUEST_TIME' }] });
-      pinIds.push([p.id, vKey]);
+      const key = (p.updatedAt || p.createdAt || '1') + '|' + JSON.stringify(p.verifications || {}).length;
+      if (isCrewPin(p)) { if (crewPath()) doc(crewPath() + '/' + p.id, JSON.stringify(p), key, 'pin'); }
+      else doc('pins/' + p.id, JSON.stringify(p), key);
     });
-    Object.entries(S.tomb).forEach(([id, t]) => {
-      w.push({ update: { name: docName('pins', id), fields: { json: { stringValue: JSON.stringify({ id, deviceId, deletedAt: t }) }, uid: { stringValue: S.auth.uid }, deleted: { booleanValue: true } } }, updateTransforms: [{ fieldPath: 'serverAt', setToServerValue: 'REQUEST_TIME' }] });
-      tombIds.push(id);
+    (window.powderRoutes ? powderRoutes.all() : []).filter(r => !r.synced && !r.from && !r.pending).forEach(r => {
+      const w = powderRoutes.shareOf(r); if (w === 'me' || (w === 'crew' && !crewPath())) return;
+      const key = w + '|' + r.name + '|' + r.pts.length + '|' + Math.round((r.stats && r.stats.dist) || 0);
+      const json = JSON.stringify(Object.assign({ from: reporterName() || '' }, powderShare.encRoute(r, 2)));
+      if (json.length > 800000) return; // far too long for one record; send it by link instead
+      if (w === 'all') doc('routes/' + r.id, json, key); else doc(crewPath() + '/' + r.id, json, key, 'route');
     });
-    state.pins.filter(p => p.source === 'user' && !mine(p)).forEach(p => {
-      const v = (p.verifications || {})[deviceId]; if (!v) return;
-      if (S.pushedChecks[p.id] === v.at) return;
-      w.push({ update: { name: docName('checks', p.id + '__' + S.auth.uid), fields: { pin: { stringValue: p.id }, json: { stringValue: JSON.stringify({ deviceId, v }) }, uid: { stringValue: S.auth.uid } } }, updateTransforms: [{ fieldPath: 'serverAt', setToServerValue: 'REQUEST_TIME' }] });
-      checkIds.push([p.id, v.at]);
-    });
-    return { w, pinIds, checkIds, tombIds };
+    return want;
   }
-  async function push() {
-    const { w, pinIds, checkIds, tombIds } = pendingWrites();
-    if (!w.length) return 0;
-    for (let i = 0; i < w.length; i += 100) {
-      const r = await fetch(docs() + ':commit', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await token() }, body: JSON.stringify({ writes: w.slice(i, i + 100) }) });
+  async function commit(writes) {
+    for (let i = 0; i < writes.length; i += 50) {
+      const r = await fetch(api() + ':commit', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await token() }, body: JSON.stringify({ writes: writes.slice(i, i + 50) }) });
       if (!r.ok) throw new Error('send ' + r.status);
     }
-    pinIds.forEach(([id, k]) => { S.pushed[id] = k; });
-    checkIds.forEach(([id, at]) => { S.pushedChecks[id] = at; });
-    tombIds.forEach(id => { delete S.tomb[id]; delete S.pushed[id]; });
+  }
+  const stamp = [{ fieldPath: 'serverAt', setToServerValue: 'REQUEST_TIME' }];
+  async function push() {
+    const want = wanted(), writes = [], done = [];
+    Object.entries(want).forEach(([path, d]) => {
+      if (S.pushed[path] === d.key) return;
+      writes.push({ update: { name: root() + '/' + path, fields: d.fields }, updateTransforms: stamp }); done.push([path, d.key]);
+    });
+    // Anything we sent before that shouldn't be there now (deleted, or moved between just me / crew / everyone): mark it removed.
+    Object.keys(S.pushed).forEach(path => {
+      if (want[path]) return;
+      const id = path.split('/').pop(), f = { json: { stringValue: JSON.stringify({ id, deviceId }) }, uid: { stringValue: S.auth.uid }, deleted: { booleanValue: true } };
+      if (path.startsWith('crews/')) f.kind = { stringValue: String(S.pushed[path]).split('#')[0] === 'route' ? 'route' : 'pin' };
+      writes.push({ update: { name: root() + '/' + path, fields: f }, updateTransforms: stamp }); done.push([path, null]);
+    });
+    // My checks on other riders' public pins
+    const checks = [];
+    state.pins.filter(p => p.source === 'user' && !mine(p) && !isCrewPin(p)).forEach(p => {
+      const v = (p.verifications || {})[deviceId]; if (!v || S.pushedChecks[p.id] === v.at) return;
+      writes.push({ update: { name: root() + '/checks/' + p.id + '__' + S.auth.uid, fields: { pin: { stringValue: p.id }, json: { stringValue: JSON.stringify({ deviceId, v }) }, uid: { stringValue: S.auth.uid } } }, updateTransforms: stamp });
+      checks.push([p.id, v.at]);
+    });
+    if (!writes.length) return 0;
+    await commit(writes);
+    done.forEach(([path, key]) => { if (key) S.pushed[path] = key; else delete S.pushed[path]; });
+    checks.forEach(([id, at]) => { S.pushedChecks[id] = at; });
     persist();
-    return w.length;
+    return writes.length;
   }
 
-  /* ---------- pull: everything that changed since last time ---------- */
-  async function query(col, after) {
-    const out = []; let cur = after;
+  /* ---------- fetch what changed ---------- */
+  async function query(path) {
+    const parts = path.split('/'), col = parts.pop(), parent = parts.length ? '/' + parts.join('/') : '';
+    const out = []; let cur = S.cursor[path] || null;
     for (let page = 0; page < 20; page++) {
       const q = { structuredQuery: { from: [{ collectionId: col }], orderBy: [{ field: { fieldPath: 'serverAt' }, direction: 'ASCENDING' }], limit: 300 } };
       if (cur) q.structuredQuery.where = { fieldFilter: { field: { fieldPath: 'serverAt' }, op: 'GREATER_THAN', value: { timestampValue: cur } } };
-      const r = await fetch(docs() + ':runQuery', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(q) });
+      const r = await fetch(api() + parent + ':runQuery', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await token() }, body: JSON.stringify(q) });
       if (!r.ok) throw new Error('fetch ' + r.status);
       const rows = (await r.json()).filter(x => x.document).map(x => x.document.fields || {});
       rows.forEach(f => out.push(f));
       if (rows.length) cur = rows[rows.length - 1].serverAt.timestampValue;
       if (rows.length < 300) break;
     }
-    return { rows: out, cursor: cur };
+    return { rows: out.filter(f => !(f.uid && f.uid.stringValue === S.auth.uid)).map(f => { let j = null; try { j = JSON.parse(f.json.stringValue); } catch (e) { } return { j, del: !!(f.deleted && f.deleted.booleanValue), kind: f.kind ? f.kind.stringValue : '', f }; }).filter(x => x.j),
+      done: () => { if (cur) S.cursor[path] = cur; } };
+  }
+  function dropPins(gone) {
+    const before = state.pins.length;
+    state.pins = state.pins.filter(p => !gone.some(g => g.id === p.id && g.deviceId === p.deviceId));
+    return before - state.pins.length;
+  }
+  async function routesIn(rows, scope) {
+    let n = 0;
+    for (const x of rows) {
+      const id = x.j.i || x.j.id;
+      if (x.del) { if (powderRoutes.removeSynced(id)) n++; continue; }
+      try { if (await powderRoutes.upsertSynced(powderShare.decRoute(x.j, String(x.j.from || '').slice(0, 40)), scope)) n++; } catch (e) { }
+    }
+    return n;
   }
   async function pull() {
-    const uid = S.auth && S.auth.uid;
-    const pins = await query('pins', S.cursor.pins);
-    const add = [], gone = [];
-    pins.rows.forEach(f => {
-      if (f.uid && f.uid.stringValue === uid) return;
-      let j; try { j = JSON.parse(f.json.stringValue); } catch (e) { return; }
-      if (!j || !j.id) return;
-      S.owners[j.id] = f.uid ? f.uid.stringValue : '';
-      if (f.deleted && f.deleted.booleanValue) gone.push(j); else add.push(j);
-    });
-    let changed = 0;
+    let changed = 0, pinsChanged = false;
+    // public pins
+    const pins = await query('pins');
+    const add = pins.rows.filter(x => !x.del && x.j.id).map(x => x.j), gone = pins.rows.filter(x => x.del).map(x => x.j);
     if (add.length) { const m = mergePins(add); changed += m.added + m.updated; }
-    if (gone.length) {
-      const before = state.pins.length;
-      state.pins = state.pins.filter(p => !gone.some(g => g.id === p.id && g.deviceId === p.deviceId));
-      changed += before - state.pins.length;
+    if (gone.length) { const k = dropPins(gone); changed += k; if (k) pinsChanged = true; }
+    pins.done();
+    // public routes
+    const routes = await query('routes');
+    changed += await routesIn(routes.rows, 'all'); routes.done();
+    // crew
+    if (crewPath()) {
+      const items = await query(crewPath());
+      const cAdd = items.rows.filter(x => x.kind === 'pin' && !x.del).map(x => x.j), cGone = items.rows.filter(x => x.kind === 'pin' && x.del).map(x => x.j);
+      if (cAdd.length) { const m = mergePins(cAdd.filter(isCrewPin)); changed += m.added + m.updated; cAdd.forEach(p => { if (!S.crewPins.includes(p.id)) S.crewPins.push(p.id); }); }
+      if (cGone.length) { const k = dropPins(cGone); changed += k; if (k) pinsChanged = true; }
+      changed += await routesIn(items.rows.filter(x => x.kind !== 'pin'), 'crew');
+      items.done();
     }
-    const checks = await query('checks', S.cursor.checks);
-    checks.rows.forEach(f => {
-      if (f.uid && f.uid.stringValue === uid) return;
-      let j; try { j = JSON.parse(f.json.stringValue); } catch (e) { return; }
-      const p = state.pins.find(x => x.id === (f.pin && f.pin.stringValue)); if (!p || !j || !j.v || !j.deviceId || j.deviceId === p.deviceId) return;
+    // checks on public pins
+    const checks = await query('checks');
+    checks.rows.forEach(({ j, f }) => {
+      const p = state.pins.find(x => x.id === (f.pin && f.pin.stringValue)); if (!p || !j.v || !j.deviceId || j.deviceId === p.deviceId) return;
       if (j.v.v !== 'confirm' && j.v.v !== 'dispute') return;
       p.verifications = p.verifications || {};
       const cur = p.verifications[j.deviceId];
-      if (!cur || (j.v.at || '') > (cur.at || '')) { p.verifications[j.deviceId] = { v: j.v.v, reason: String(j.v.reason || '').slice(0, 60), note: String(j.v.note || '').slice(0, 200), name: String(j.v.name || '').slice(0, 40), at: String(j.v.at || '').slice(0, 30) }; changed++; }
+      if (!cur || (j.v.at || '') > (cur.at || '')) { p.verifications[j.deviceId] = { v: j.v.v, reason: String(j.v.reason || '').slice(0, 60), note: String(j.v.note || '').slice(0, 200), name: String(j.v.name || '').slice(0, 40), at: String(j.v.at || '').slice(0, 30) }; changed++; pinsChanged = true; }
     });
-    S.cursor = { pins: pins.cursor || S.cursor.pins, checks: checks.cursor || S.cursor.checks };
+    checks.done();
     persist();
-    if (changed) { savePins(); renderPins(); }
+    if (pinsChanged) { savePins(); renderPins(); }
     return changed;
   }
 
@@ -136,34 +178,81 @@
       const got = await pull();
       S.last = new Date().toISOString(); store.set('syncLast', S.last);
       if (manual) toast('Synced' + (sent ? ' · sent ' + sent : '') + (got ? ' · ' + got + ' new or updated' : ''));
-      else if (got) toast(got + ' new or updated pin' + (got === 1 ? '' : 's') + ' from other riders', 2500);
+      else if (got) toast(got + ' new or updated from other riders', 2500);
     } catch (e) {
       S.err = String(e.message || e);
       if (/sign-in|40[13]/.test(S.err)) { S.auth = null; store.set('syncAuth', null); }
       if (manual) toast('Sync didn\'t work: ' + S.err);
     }
     S.busy = false; paint();
+    if (S.again) { S.again = false; soon(); } // something changed while we were syncing
   }
-  function soon(ms = 3000) { clearTimeout(S.timer); S.timer = setTimeout(() => sync(false), ms); }
-
-  // Anything that saves pins (new marker, edit, check, delete) triggers a sync a few seconds later.
+  function soon(ms = 3000) { if (!ready() || !S.on) return; if (S.busy) { S.again = true; return; } clearTimeout(S.timer); S.timer = setTimeout(() => sync(false), ms); }
+  // Saving pins anywhere in the app (new marker, edit, check, delete) syncs a few seconds later.
   // (savePins is a top-level function in app.js, so it lives on window and app.js picks up the wrapped one.)
   const origSave = window.savePins;
-  window.savePins = function () { origSave(); if (!S.busy && ready() && S.on) soon(); };
+  window.savePins = function () { origSave(); if (S.busy) S.again = true; else soon(); };
+
+  /* ---------- crews ---------- */
+  function newCode() { const a = new Uint8Array(12); crypto.getRandomValues(a); return [...a].map(b => 'abcdefghijkmnpqrstuvwxyz23456789'[b % 32]).join('') + 'pp00'; }
+  function setCrew(c) {
+    const old = S.crew;
+    S.crew = c; store.set('crew', c);
+    if (old && (!c || old.code !== c.code)) {
+      // Leaving a crew: their routes and good-snow markers go from this phone; mine get removed from that crew next sync.
+      powderRoutes.all().filter(r => r.synced === 'crew').map(r => r.id).forEach(id => powderRoutes.removeSynced(id));
+      state.pins = state.pins.filter(p => !(S.crewPins.includes(p.id) && !mine(p))); S.crewPins = []; origSave(); renderPins();
+      delete S.cursor['crews/' + old.code + '/items'];
+    }
+    persist(); soon(500);
+  }
+  const inviteLink = () => BASE + '#crew=' + S.crew.code + '~' + encodeURIComponent(S.crew.name);
+  async function invite() {
+    const link = inviteLink(), text = 'Join my Powder Pigs crew "' + S.crew.name + '" to share tracks, routes and good-snow spots:';
+    if (navigator.share) { try { await navigator.share({ title: 'Join my crew', text, url: link }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+    try { await navigator.clipboard.writeText(text + '\n' + link); toast('Invite link copied. Paste it into a message.'); } catch (e) { toast('Couldn\'t copy. Long-press the link in Settings.'); }
+  }
+  function askJoin(code, name) {
+    if (!/^[a-z0-9]{16,40}$/.test(code)) { toast('That crew link is broken'); return; }
+    if (S.crew && S.crew.code === code) { toast('You\'re already in ' + S.crew.name); return; }
+    name = String(name || 'Crew').slice(0, 40);
+    openSheet('Join a crew', '<p style="margin:0">Join <b>' + esc(name) + '</b>?</p><p class="small muted" style="margin:0">Your crew sees the routes and tracks you share with "My crew" and your good-snow markers, and you see theirs. Hazards and slide reports are shared with all riders either way.' +
+      (S.crew ? ' This replaces your current crew, <b>' + esc(S.crew.name) + '</b>.' : '') + '</p>' +
+      (ready() ? '' : '<p class="small warn-text" style="margin:0">Live sync isn\'t set up in this app yet, so the crew won\'t sync until it is.</p>') +
+      '<div class="btn-row"><button class="btn primary" id="cjYes">Join</button><button class="btn" id="cjNo">Not now</button></div>', { view: 'crewjoin' });
+    $('#cjNo').onclick = closeSheet;
+    $('#cjYes').onclick = () => { setCrew({ code, name, joinedAt: new Date().toISOString() }); closeSheet(); toast('You\'re in ' + name + '. New routes and tracks go to the crew unless you change them.', 3500); };
+  }
+  function joinFromText(t) { const m = String(t || '').match(/#crew=([a-z0-9]+)(?:~([^&\s]*))?/); if (!m) { toast('Paste the whole invite link'); return; } let n = ''; try { n = decodeURIComponent(m[2] || ''); } catch (e) { } askJoin(m[1], n); }
+  function checkHash() {
+    if (!/#crew=/.test(location.hash)) return;
+    const h = location.hash; history.replaceState(null, '', location.pathname + location.search);
+    const wait = (n = 0) => { if (window.powderRoutes && state.areas && state.areas.length) joinFromText(h); else if (n < 50) setTimeout(() => wait(n + 1), 200); };
+    wait();
+  }
+  window.addEventListener('hashchange', checkHash);
+  checkHash();
 
   /* ---------- Settings section ---------- */
   const ago = t => { if (!t) return 'never'; const s = (Date.now() - Date.parse(t)) / 1000; return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; };
+  function crewHtml() {
+    if (S.crew) return '<div class="stack" id="crewBox"><p class="eyebrow">Your crew</p><p style="margin:0"><b>' + esc(S.crew.name) + '</b></p>' +
+      '<p class="small muted" style="margin:0">Your crew sees your good-snow markers and the routes and tracks you share with "My crew" (new ones do by default; change it on each route). Everyone sees hazards and slide reports.</p>' +
+      '<div class="btn-row"><button class="btn primary" id="crInvite">Invite friends</button><button class="btn" id="crLeave">Leave crew</button></div></div>';
+    return '<div class="stack" id="crewBox"><p class="eyebrow">Your crew</p><p class="small muted" style="margin:0">A crew is your group of friends. Tracks, routes and good-snow markers you share with "My crew" only go to them. Start one and send the invite, or tap an invite link a mate sent you.</p>' +
+      '<div class="field"><label for="crName">Crew name</label><input type="text" id="crName" maxlength="40" placeholder="e.g. Powder Pigs Hakuba 2027"></div><button class="btn primary" id="crMake">Start a crew</button></div>';
+  }
   function html() {
-    if (!ready()) return '<div class="stack" id="syncBox"><p class="eyebrow">Live sync</p><p class="small muted" style="margin:0">Not set up yet. Once it is, everyone\'s slide reports and hazard markers appear on every phone automatically when there\'s signal.</p></div>';
+    if (!ready()) return '<div class="stack" id="syncBox"><p class="eyebrow">Live sync</p><p class="small muted" style="margin:0">Not set up yet. Once it is, hazards and slide reports appear on every phone automatically when there\'s signal, and crews can share tracks.</p></div>' + crewHtml();
     const others = state.pins.filter(p => p.source === 'user' && p.deviceId !== deviceId).length;
     return '<div class="stack" id="syncBox"><p class="eyebrow">Live sync</p>' +
-      '<label class="list-item pick"><input type="checkbox" id="syncOn"' + (S.on ? ' checked' : '') + '><span><span class="t">Share pins with all riders automatically</span><br><span class="s">Your slide reports, slide paths, hazard markers and checks go to everyone using Powder Pigs, and theirs come to you, whenever you have signal. Routes and tracks stay private.</span></span></label>' +
+      '<label class="list-item pick"><input type="checkbox" id="syncOn"' + (S.on ? ' checked' : '') + '><span><span class="t">Sync automatically when there\'s signal</span><br><span class="s">Your slide reports, slide paths, hazard markers and checks go to every rider, and theirs come to you. Routes and tracks only go where you choose on each one.</span></span></label>' +
       '<p class="small" style="margin:0" id="syncStatus">' + status() + '</p>' +
-      '<p class="small muted" style="margin:0">' + others + ' pin' + (others === 1 ? '' : 's') + ' from other riders on this phone. Only you can change or delete your own pins.</p>' +
-      '<button class="btn" id="syncNow"' + (S.on ? '' : ' disabled') + '>Sync now</button></div>';
+      '<p class="small muted" style="margin:0">' + others + ' pin' + (others === 1 ? '' : 's') + ' from other riders on this phone. Only you can change or delete your own.</p>' +
+      '<button class="btn" id="syncNow"' + (S.on ? '' : ' disabled') + '>Sync now</button></div>' + crewHtml();
   }
   function status() {
-    if (!S.on) return 'Off. Your pins stay on this phone.';
+    if (!S.on) return 'Off. Everything stays on this phone.';
     if (S.busy) return 'Syncing…';
     if (!navigator.onLine) return 'Waiting for signal · last synced ' + ago(S.last);
     return (S.err ? '<span class="warn-text">Last try failed (' + esc(S.err) + ')</span> · ' : '') + 'Last synced ' + ago(S.last);
@@ -172,6 +261,12 @@
   function wire() {
     const on = $('#syncOn'); if (on) on.onchange = () => { S.on = on.checked; store.set('syncOn', S.on); $('#syncNow').disabled = !S.on; paint(); if (S.on) sync(true); };
     const now = $('#syncNow'); if (now) now.onclick = () => sync(true);
+    const mk = $('#crMake'); if (mk) mk.onclick = () => { const n = $('#crName').value.trim(); if (!n) { toast('Give your crew a name'); return; } setCrew({ code: newCode(), name: n, joinedAt: new Date().toISOString() }); showSettings(); invite(); };
+    const inv = $('#crInvite'); if (inv) inv.onclick = invite;
+    const lv = $('#crLeave'); if (lv) lv.onclick = () => {
+      if (!lv.dataset.armed) { lv.dataset.armed = '1'; lv.textContent = 'Tap again to leave'; lv.classList.add('danger'); return; }
+      setCrew(null); toast('Left the crew'); showSettings();
+    };
   }
 
   async function init() {
@@ -185,9 +280,5 @@
   }
   init();
 
-  window.powderSync = {
-    html, wire, sync: () => sync(true),
-    deleted(p) { if (ready() && p && p.source === 'user' && p.deviceId === deviceId && S.pushed[p.id]) { S.tomb[p.id] = new Date().toISOString(); persist(); soon(); } },
-    _S: S,
-  };
+  window.powderSync = { html, wire, soon, sync: () => sync(true), crew: () => S.crew, joinFromText, deleted() { soon(); }, _S: S };
 })();

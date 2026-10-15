@@ -1,19 +1,27 @@
 rules_version = '2';
 // Live sync rules for Backcountry Powder Pigs.
-// Anyone can read pins and checks. A phone can only create or change its own (matched by its anonymous sign-in id).
+// Public: pins (slide reports, slide paths, hazard markers), checks, and routes marked "Everyone". Anyone can read.
+// Crews: crews/{code}/items, readable only by signed-in phones that know the crew code (it's in the invite link).
+// A phone can only create or change its own records (matched by its anonymous sign-in id).
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function okPin() {
+    function base(maxLen) {
       let d = request.resource.data;
-      return d.keys().hasOnly(['json', 'uid', 'deleted', 'serverAt'])
-        && d.json is string && d.json.size() < 10000
+      return d.json is string && d.json.size() < maxLen
         && d.uid == request.auth.uid && d.deleted is bool && d.serverAt == request.time;
     }
+    function owner() { return resource.data.uid == request.auth.uid; }
+
     match /pins/{id} {
       allow read: if true;
-      allow create: if signedIn() && id.size() < 64 && okPin();
-      allow update: if signedIn() && resource.data.uid == request.auth.uid && okPin();
+      allow create: if signedIn() && id.size() < 64 && request.resource.data.keys().hasOnly(['json', 'uid', 'deleted', 'serverAt']) && base(10000);
+      allow update: if signedIn() && owner() && request.resource.data.keys().hasOnly(['json', 'uid', 'deleted', 'serverAt']) && base(10000);
+    }
+    match /routes/{id} {
+      allow read: if true;
+      allow create: if signedIn() && id.size() < 64 && request.resource.data.keys().hasOnly(['json', 'uid', 'deleted', 'serverAt']) && base(900000);
+      allow update: if signedIn() && owner() && request.resource.data.keys().hasOnly(['json', 'uid', 'deleted', 'serverAt']) && base(900000);
     }
     match /checks/{id} {
       allow read: if true;
@@ -24,6 +32,15 @@ service cloud.firestore {
         && request.resource.data.json is string && request.resource.data.json.size() < 2000
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.serverAt == request.time;
+    }
+    match /crews/{code}/items/{id} {
+      allow read: if signedIn() && code.size() >= 16;
+      allow create: if signedIn() && code.size() >= 16 && id.size() < 64
+        && request.resource.data.keys().hasOnly(['json', 'uid', 'deleted', 'kind', 'serverAt'])
+        && request.resource.data.kind in ['pin', 'route'] && base(900000);
+      allow update: if signedIn() && owner()
+        && request.resource.data.keys().hasOnly(['json', 'uid', 'deleted', 'kind', 'serverAt'])
+        && request.resource.data.kind in ['pin', 'route'] && base(900000);
     }
   }
 }

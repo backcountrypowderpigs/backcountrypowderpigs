@@ -381,3 +381,6 @@ body.recording .scale-hide, body.planning .leaflet-control-scale { visibility: h
 .list-item.pick { cursor: pointer; align-items: center; }
 .list-item.pick input { width: 22px; height: 22px; flex: 0 0 auto; accent-color: var(--accent, #123048); margin: 0 4px 0 0; }
 details summary { cursor: pointer; color: var(--muted); }
+/* keep full-size tap targets for buttons sitting directly in a panel */
+.sheet-body > .btn { min-height: 44px; }
+.sheet-body > .btn.small { min-height: 36px; }

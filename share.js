@@ -67,18 +67,22 @@
     o.lat = +(+p.lat).toFixed(5); o.lon = +(+p.lon).toFixed(5);
     return o;
   }
+  // One route as a compact object (used by links and by crew sync).
+  function encRoute(x, tol = 3) {
+    const track = x.type === 'track';
+    const o = { i: x.id, n: x.name, t: track ? 't' : 'p', c: x.created, p: encPts(track ? thin(x.pts, tol) : x.pts, track) };
+    if (track && x.stats) o.s = ['dist', 'gain', 'loss', 'time', 'moving'].map(k => Math.round(x.stats[k] || 0));
+    return o;
+  }
+  function decRoute(x, from) {
+    const track = x.t === 't';
+    return { id: String(x.i || ''), name: String(x.n || ''), type: track ? 'track' : 'plan', created: x.c, from, pts: Array.isArray(x.p) ? decPts(x.p, track) : [], sentStats: track && Array.isArray(x.s) ? x.s : null };
+  }
   async function buildLink(routes, pins) {
     const from = reporterName();
     let tol = 3, link;
     for (let tries = 0; tries < 6; tries++) {
-      const r = routes.map(x => {
-        const track = x.type === 'track';
-        let pts = track ? thin(x.pts, tol) : x.pts;
-        const o = { i: x.id, n: x.name, t: track ? 't' : 'p', c: x.created, p: encPts(pts, track) };
-        // Recorded tracks: send the stats from the full-detail track so your mate sees the same numbers you do.
-        if (track && x.stats) o.s = ['dist', 'gain', 'loss', 'time', 'moving'].map(k => Math.round(x.stats[k] || 0));
-        return o;
-      });
+      const r = routes.map(x => encRoute(x, tol));
       link = BASE + '#s=' + await pack({ a: 'pp', v: 1, f: from, r, p: pins.map(trimPin) });
       if (link.length <= MAX_LINK || !routes.some(x => x.type === 'track')) break;
       tol *= 2; // a very long track: thin it harder and try again
@@ -151,10 +155,7 @@
     try { d = await unpack(decodeURIComponent(code)); } catch (e) { toast('That link is broken or cut off. Ask for it again.', 4000); return; }
     if (!d || d.a !== 'pp') { toast('That isn\'t a Powder Pigs link'); return; }
     const from = String(d.f || '').slice(0, 40) || 'A mate';
-    const routes = (Array.isArray(d.r) ? d.r : []).slice(0, 50).map(x => {
-      const track = x.t === 't';
-      return { id: String(x.i || ''), name: String(x.n || ''), type: track ? 'track' : 'plan', created: x.c, from, pts: Array.isArray(x.p) ? decPts(x.p, track) : [], sentStats: track && Array.isArray(x.s) ? x.s : null };
-    }).filter(r => r.pts.length > 1);
+    const routes = (Array.isArray(d.r) ? d.r : []).slice(0, 50).map(x => decRoute(x, from)).filter(r => r.pts.length > 1);
     const pins = (Array.isArray(d.p) ? d.p : []).slice(0, 2000).filter(p => p && isFinite(p.lat) && isFinite(p.lon));
     if (!routes.length && !pins.length) { toast('That link is empty'); return; }
     const have = new Set((window.powderRoutes ? powderRoutes.all() : []).map(r => r.id)), havePins = new Set(state.pins.map(p => p.id));
@@ -188,7 +189,10 @@
     };
   }
   function codeFrom(text) { const m = String(text || '').match(/#s=([A-Za-z0-9_\-%]+)/); return m ? m[1] : null; }
-  function openText(text) { const c = codeFrom(text); if (!c) { toast('Paste the whole link your mate sent'); return; } receive(c); }
+  function openText(text) {
+    if (/#crew=/.test(text || '') && window.powderSync) { powderSync.joinFromText(text); return; }
+    const c = codeFrom(text); if (!c) { toast('Paste the whole link your mate sent'); return; } receive(c);
+  }
   function checkHash() {
     const c = codeFrom(location.hash); if (!c) return;
     history.replaceState(null, '', location.pathname + location.search); // so a refresh or the back button doesn't open it again
@@ -198,5 +202,5 @@
   window.addEventListener('hashchange', checkHash);
   checkHash();
 
-  window.powderShare = { send, picker, openText };
+  window.powderShare = { send, picker, openText, encRoute, decRoute };
 })();

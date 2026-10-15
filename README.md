@@ -40,7 +40,12 @@ Backcountry avalanche map for Japan. Built-in areas: Hakuba, Myoko, Lotte Arai, 
 
 ## Live sync (everyone's pins on every phone)
 
-Slide reports, slide paths, hazard markers and checks sync through a free Google Firebase (Firestore) database whenever a phone has signal; with no signal the app works as normal and catches up later. Routes and tracks stay private (send them by link). Each phone signs in anonymously, and the rules in `firestore.rules` only let a phone change or delete its own pins. Riders can turn it off in Settings → Live sync.
+Through a free Google Firebase (Firestore) database, whenever a phone has signal; with no signal the app works as normal and catches up later.
+- **Everyone:** slide reports, slide paths, hazard markers, checks, and any route or track whose owner picks "Everyone".
+- **Your crew only:** good-snow markers, and routes and tracks set to "My crew" (the default for new ones once you're in a crew). Start a crew in Settings and send the invite link; friends tap it to join.
+- **Just me:** routes and tracks set to "Just me" never leave the phone.
+
+Each phone signs in anonymously, and `firestore.rules` only lets a phone change or delete its own things. Crew data is only readable with the crew code from the invite. Riders can turn sync off in Settings.
 
 Setup (once):
 1. console.firebase.google.com → Add project (Analytics off).
