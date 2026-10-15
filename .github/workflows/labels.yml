@@ -1,0 +1,42 @@
+name: Build map names in English
+
+# Builds data/labels/<area>.json from the GSI vector map: every name printed on the topo map
+# (valleys, creeks, peaks, ridges, passes, waterfalls, settlements...) with an English reading and meaning.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - data/areas.json
+      - tools/build_labels.py
+      - .github/workflows/labels.yml
+  schedule:
+    - cron: '41 4 2 */3 *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: labels
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests pykakasi mapbox-vector-tile pmtiles
+      - run: python tools/build_labels.py
+      - name: Commit if changed
+        run: |
+          git config user.name "powder-pigs-bot"
+          git config user.email "backcountrypowderpigs@users.noreply.github.com"
+          git add data/labels || true
+          if git diff --cached --quiet; then echo "No changes"; exit 0; fi
+          git commit -m "Update English map names"
+          git pull --rebase origin main
+          git push
