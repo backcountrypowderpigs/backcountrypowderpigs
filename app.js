@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.34';
+const APP_VERSION = '2026-10-15.35';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -1277,6 +1277,8 @@ function openPin(id) {
   const isRecent = p.kind === 'recent', isHz = p.kind === 'hazard';
   let h = (isHz ? '<div class="row"><span class="hz-pin" style="background:' + hazardOf(p.htype).col + '">' + hazardSvg(p.htype, 20) + '</span><b>' + esc(hazardOf(p.htype).label) + '</b>' + (p.date ? '<span class="muted small">seen ' + fmtDate(p.date) + ' · ' + Math.floor(daysAgo(p.date)) + ' days ago</span>' : '') + '</div>' : '') +
     '<div class="row"><span class="badge ' + t.level + '">' + esc(t.label) + '</span>' + (isRecent && p.date ? '<span class="muted small">' + fmtDate(p.date) + ' · ' + Math.floor(daysAgo(p.date)) + ' days ago</span>' : '') + '</div>';
+  // Move is right at the top so it's easy to find on any marker.
+  h += '<button class="btn small" id="pMoveTop">✥ Move this marker' + (isMine(p) ? '' : ' (on my map)') + '</button>';
   if (p.source === 'jan' && p.incidents) {
     h += '<div class="stack"><b>' + esc(p.name) + '</b> <span class="muted">' + esc(p.nameJa || '') + '</span><span class="small muted">' + esc(p.locNote || '') + '</span>' +
       p.incidents.map(i => '<div class="card"><b>' + fmtDate(i.date) + '</b><span class="small">' + esc(i.summary) + '</span><a class="small" href="' + esc(i.url) + '" target="_blank" rel="noopener">JAN incident record ↗</a></div>').join('') +
@@ -1305,7 +1307,7 @@ function openPin(id) {
   }
   if (!isMine(p)) {
     h += p.movedByMe ? '<p class="small muted" style="margin:0">You moved this one on your map. Others still see the original spot.</p><div class="btn-row"><button class="btn" id="pMoveLocal">Move again</button><button class="btn" id="pUnmove">Put it back</button></div>'
-      : '<button class="btn" id="pMoveLocal">Move it on my map</button>';
+      : '';
   }
   if (p.source === 'user') h += '<button class="btn" id="pSend">Send this to a mate</button>';
   h += '<a class="small" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=' + p.lat.toFixed(5) + ',' + p.lon.toFixed(5) + '">' + p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) + ' ↗</a>';
@@ -1313,6 +1315,7 @@ function openPin(id) {
   map.panTo([p.lat, p.lon]);
 
   const sd = $('#pSend'); if (sd) sd.onclick = () => window.powderShare && powderShare.send({ pins: [p] }, isHz ? hazardOf(p.htype).label + ' marker' : isRecent ? 'Avalanche report' : 'Slide path');
+  $('#pMoveTop').onclick = () => { map.setView([p.lat, p.lon], Math.max(map.getZoom(), 15)); startPlacing(isMine(p) ? { movePin: p.id } : { moveLocal: p.id }); };
   const ml = $('#pMoveLocal'); if (ml) ml.onclick = () => { map.setView([p.lat, p.lon], Math.max(map.getZoom(), 15)); startPlacing({ moveLocal: p.id }); };
   const um = $('#pUnmove'); if (um) um.onclick = () => { delete state.moved[p.id]; store.set('movedPins', state.moved); renderPins(); toast('Back at its original spot'); openPin(p.id); };
   const up = $('#unplace'); if (up) up.onclick = () => { delete state.placed[p.id]; store.set('placed', state.placed); renderPins(); closeSheet(); };
