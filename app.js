@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.33';
+const APP_VERSION = '2026-10-15.34';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -322,8 +322,10 @@ function buildSatLayer(id) {
     attribution: 'Contains modified Copernicus Sentinel data ' + new Date().getFullYear() + ' (Microsoft Planetary Computer)',
   }).addTo(map);
 }
+const savedPhoto = () => { const p = state.area && state.packs[state.area.id]; return !!(p && p.photoZ); };
 function updateSatFlag() {
   const f = $('#satFlag');
+  if (state.base === 'sat' && sat.err === 'No signal' && savedPhoto()) { f.textContent = 'No signal · showing saved HD photo'; f.hidden = false; return; }
   if (state.base === 'hd') { f.textContent = 'HD photo · summer, not current'; f.hidden = false; return; }
   if (state.base !== 'sat') { f.hidden = true; return; }
   f.textContent = sat.err ? 'Satellite unavailable · showing topo' : sat.busy ? 'Finding the latest clear satellite pass…' : sat.date ? 'Satellite ' + fmtDate(sat.date) + (map.getZoom() > 14 ? ' · zoom out for sharper, or HD photo' : '') : 'Satellite';
@@ -341,12 +343,15 @@ async function ensureSat() {
       sat.loadedFor = state.area.id;
     }
   } catch (e) { sat.err = e.message; if (sat.layer) { map.removeLayer(sat.layer); sat.layer = null; } }
+  // No signal: fall back to the HD photo saved with the area (if downloaded), otherwise the topo shows.
+  if (sat.err === 'No signal' && savedPhoto() && !map.hasLayer(hdPhoto)) hdPhoto.addTo(map);
+  if (!sat.err && map.hasLayer(hdPhoto)) map.removeLayer(hdPhoto);
   sat.busy = false; updateSatFlag();
 }
 function setBase() {
   if (!['sat', 'hd', 'topo'].includes(state.base)) state.base = 'sat';
   if (sat.layer && state.base !== 'sat') { map.removeLayer(sat.layer); sat.layer = null; sat.loadedFor = null; }
-  if (state.base === 'hd') { if (!map.hasLayer(hdPhoto)) hdPhoto.addTo(map); } else if (map.hasLayer(hdPhoto)) map.removeLayer(hdPhoto);
+  if (state.base === 'hd') { if (!map.hasLayer(hdPhoto)) hdPhoto.addTo(map); } else if (state.base !== 'sat' && map.hasLayer(hdPhoto)) map.removeLayer(hdPhoto);
   if (!map.hasLayer(topo)) topo.addTo(map);
   shadeLayer.addTo(map); aspectLayer.addTo(map);
   updateNativeZoom();
@@ -361,6 +366,8 @@ function updateNativeZoom() {
   const p = state.area && state.packs[state.area.id];
   const z = (!navigator.onLine && p) ? p.maxZ : 18;
   if (topo.options.maxNativeZoom !== z) { topo.options.maxNativeZoom = z; topo.redraw(); }
+  const pz = (!navigator.onLine && p && p.photoZ) ? p.photoZ : 18;
+  if (hdPhoto.options.maxNativeZoom !== pz) { hdPhoto.options.maxNativeZoom = pz; hdPhoto.redraw(); }
 }
 
 /* ------------------------------------------------------------------ markers */
@@ -434,7 +441,7 @@ function allPins() {
       out.push(Object.assign({}, r, { kind: 'recent', source: b.isDemo ? 'demo' : 'jan', sourceLabel: r.source || 'JAN bulletin', area: a ? a.id : '' }));
     });
   });
-  return out;
+  return out.map(p => (state.moved[p.id] && !isMine(p)) ? Object.assign({}, p, { lat: state.moved[p.id][0], lon: state.moved[p.id][1], approx: false, movedByMe: true }) : p);
 }
 function renderPins() {
   pinLayer.clearLayers();
@@ -456,6 +463,9 @@ function renderPins() {
   });
 }
 function findPin(id) { return allPins().find(p => p.id === id); }
+// Pins that aren't yours (JAN slide paths, bulletin avalanches, other riders' pins) can be moved on your own map.
+state.moved = store.get('movedPins', {});
+const isMine = p => p.source === 'user' && p.deviceId === deviceId;
 
 /* ------------------------------------------------------------------ POIs (OpenStreetMap via Overpass) */
 const POI_GLYPH = { wild: '♨', onsen: '♨', parking: 'P', hut: '▲', lift: '⇡', shop: '24', medical: '✚', police: '交' };
@@ -684,6 +694,8 @@ async function downloadPack(area, maxZ, onProgress) {
   for (let z = 10; z <= maxZ; z++) tilesFor(area.bounds, z).forEach(t => jobs.push(tileUrl(GSI.std, ...t)));
   for (let z = 12; z <= 14; z++) tilesFor(area.bounds, z).forEach(t => jobs.push(tileUrl(GSI.dem, ...t)));
   if (maxZ >= 16) tilesFor(area.bounds, 15).forEach(t => jobs.push(tileUrl(GSI.dem5, ...t))); // sharper close-up shading offline
+  // GSI HD aerial photo as an offline backup: to zoom 15 (Standard) or 16 (Detailed).
+  for (let z = 10; z <= maxZ; z++) tilesFor(area.bounds, z).forEach(t => jobs.push(tileUrl(GSI.photo, ...t)));
   let done = 0, bytes = 0, failed = 0; const total = jobs.length + 2;
   let i = 0;
   async function worker() {
@@ -719,7 +731,7 @@ async function downloadPack(area, maxZ, onProgress) {
   }
   store.set('geo', state.geo);
   done++; onProgress(1, bytes);
-  state.packs[area.id] = { date: new Date().toISOString(), maxZ, bytes, tiles: jobs.length };
+  state.packs[area.id] = { date: new Date().toISOString(), maxZ, photoZ: maxZ, bytes, tiles: jobs.length };
   store.set('packs', state.packs);
   state._pois = null;
 }
@@ -731,7 +743,7 @@ function estimatePack(area, maxZ) {
   let n = 0; for (let z = 10; z <= maxZ; z++) n += tilesFor(area.bounds, z).length;
   let d = 0; for (let z = 12; z <= 14; z++) d += tilesFor(area.bounds, z).length;
   if (maxZ >= 16) d += tilesFor(area.bounds, 15).length;
-  return n * 18000 + d * 60000;
+  return n * 18000 + d * 60000 + n * 30000; // topo + elevation + HD photo
 }
 
 /* ------------------------------------------------------------------ bulletins */
@@ -908,7 +920,7 @@ function showLayers() {
   let h = '<div class="field"><span class="lbl">Map</span>' + seg('base', state.base, [['sat', 'Latest satellite'], ['hd', 'HD photo'], ['topo', 'Topo']]);
   if (state.base === 'sat') h += sat.err ? '<div class="card warn small">' + esc(sat.err === 'No signal' ? 'No signal, so the topo map is showing. The satellite comes back when you have signal.' : sat.err) + '</div>'
     : '<span class="help">The newest clear satellite pass' + (sat.date ? ' (' + fmtDate(sat.date) + ')' : '') + ', for current snow cover. 10 m detail: ridgelines, forest edges, big debris; it goes soft when you zoom right in. Needs signal.</span>';
-  if (state.base === 'hd') h += '<span class="help">Sharp aerial photo for close-up detail of trees, gullies and rocks. Taken in summer and can be a few years old, so no snow. Needs signal.</span>';
+  if (state.base === 'hd') h += '<span class="help">Sharp aerial photo for close-up detail of trees, gullies and rocks. Taken in summer and can be a few years old, so no snow. Saved with each downloaded area, so it works with no signal there.</span>';
   h += '</div>';
   h += '<div class="field"><span class="lbl">Shading</span>' + seg('shade', state.shade, [['danger', 'Today\'s danger'], ['slope', 'Slope angle'], ['off', 'Off']]) + '</div>';
   if (state.shade === 'danger' && eff !== 'danger') h += '<div class="card warn small">No danger rating for ' + esc(state.area.name) + ' right now' + (b && b.status === 'off-season' ? ' (off season)' : '') + ', so the map is showing slope angles instead.</div>';
@@ -1067,16 +1079,17 @@ function areaForm(existing, bounds) {
 async function showPacks() {
   let est = '';
   try { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); est = 'Using ' + fmtBytes(e.usage || 0) + ' on this phone.'; } } catch (e) { }
-  const h = '<p class="small muted" style="margin:0">Download only where you\'re riding. Each pack holds the GSI topo map, elevation data for slope shading, lifts and runs, onsens, parking and the known slide paths. ' + est + '</p>' +
+  const h = '<p class="small muted" style="margin:0">Download only where you\'re riding. Each pack holds the GSI topo map, the GSI HD aerial photo (an offline backup when there\'s no signal), elevation data for slope shading, lifts and runs, onsens, parking and the known slide paths. ' + est + '</p>' +
     state.areas.map(a => {
       const p = state.packs[a.id];
       return '<div class="card" data-pack="' + a.id + '"><div class="spread"><b>' + esc(a.name) + ' <span class="muted">' + esc(a.nameJa || '') + '</span></b>' + (p ? '<span class="badge trusted">Offline ready</span>' : '<span class="badge unverified">Not saved</span>') + '</div>' +
-        (p ? '<span class="small muted">' + fmtBytes(p.bytes) + ' · detail to zoom ' + p.maxZ + ' · saved ' + fmtDate(p.date) + '</span>' : '') +
+        (p ? '<span class="small muted">' + fmtBytes(p.bytes) + ' · detail to zoom ' + p.maxZ + (p.photoZ ? ' · HD photo saved' : '') + ' · saved ' + fmtDate(p.date) + '</span>' : '') +
+        (p && !p.photoZ ? '<span class="small warn-text">Tap Update to add the HD photo to this area.</span>' : '') +
         (a.boxCheck ? '<span class="small warn-text">Box is approximate. Check it with Adjust box in the area menu first.</span>' : '') +
         '<div class="seg" data-detail><button type="button" data-v="15" class="on">Standard ~' + fmtBytes(estimatePack(a, 15)) + '</button><button type="button" data-v="16">Detailed ~' + fmtBytes(estimatePack(a, 16)) + '</button></div>' +
         '<div class="progress" hidden><i></i></div><span class="small muted prog-text" hidden></span>' +
         '<div class="btn-row"><button class="btn primary" data-dl>' + (p ? 'Update' : 'Download') + '</button>' + (p ? '<button class="btn" data-del>Delete</button>' : '') + '</div></div>';
-    }).join('') + '<p class="small muted" style="margin:0">Use Wi-Fi. Standard is fine for planning; Detailed shows every contour and track up close.</p>';
+    }).join('') + '<p class="small muted" style="margin:0">Use Wi-Fi. Standard is fine for planning; Detailed shows every contour, track and tree up close (HD photo to zoom 16).</p>';
   openSheet('Offline areas', h, { view: 'packs', tall: true });
   $('#sheetBody').querySelectorAll('[data-pack]').forEach(card => {
     const a = state.areas.find(x => x.id === card.dataset.pack);
@@ -1130,8 +1143,8 @@ let placing = null;
 function startPlacing(opts = {}) {
   closeSheet(); placing = Object.assign({ kind: 'recent' }, opts);
   $('#placeBar').hidden = false; $('.fabs').hidden = true; $('#readout').hidden = true;
-  $('#placeKind').hidden = !!opts.placeSlide || !!opts.movePin;
-  $('#placeTitle').textContent = opts.placeSlide ? 'Put the cross on ' + (state.slides.find(s => s.id === opts.placeSlide) || {}).name : opts.movePin ? 'Move the cross to the right spot' : 'Move the map to put the cross on the spot';
+  $('#placeKind').hidden = !!opts.placeSlide || !!opts.movePin || !!opts.moveLocal;
+  $('#placeTitle').textContent = opts.placeSlide ? 'Put the cross on ' + (state.slides.find(s => s.id === opts.placeSlide) || {}).name : (opts.movePin || opts.moveLocal) ? 'Move the cross to the right spot' : 'Move the map to put the cross on the spot';
   $('#placeKind').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === placing.kind));
   if (map.getZoom() < 14) map.setZoom(14);
 }
@@ -1141,6 +1154,7 @@ $('#placeCancel').addEventListener('click', stopPlacing);
 $('#placeOk').addEventListener('click', () => {
   const c = map.getCenter(); const p = placing; stopPlacing();
   if (p.placeSlide) { state.placed[p.placeSlide] = [c.lat, c.lng]; store.set('placed', state.placed); renderPins(); toast('Placed. Marked as approximate.'); return; }
+  if (p.moveLocal) { state.moved[p.moveLocal] = [+c.lat.toFixed(6), +c.lng.toFixed(6)]; store.set('movedPins', state.moved); renderPins(); toast('Moved on your map'); openPin(p.moveLocal); return; }
   if (p.movePin) { const pin = state.pins.find(x => x.id === p.movePin); if (pin) { pin.lat = c.lat; pin.lon = c.lng; pin.updatedAt = new Date().toISOString(); savePins(); renderPins(); openPin(pin.id); } return; }
   pinForm(p.kind, c.lat, c.lng);
 });
@@ -1289,12 +1303,18 @@ function openPin(id) {
       h += '<p class="small muted" style="margin:0">You made this pin. Other riders can verify it once you send it to them.</p><div class="btn-row"><button class="btn" id="pEdit">Edit</button><button class="btn" id="pMove">Move</button><button class="btn" id="pDel">Delete</button></div>';
     }
   }
+  if (!isMine(p)) {
+    h += p.movedByMe ? '<p class="small muted" style="margin:0">You moved this one on your map. Others still see the original spot.</p><div class="btn-row"><button class="btn" id="pMoveLocal">Move again</button><button class="btn" id="pUnmove">Put it back</button></div>'
+      : '<button class="btn" id="pMoveLocal">Move it on my map</button>';
+  }
   if (p.source === 'user') h += '<button class="btn" id="pSend">Send this to a mate</button>';
   h += '<a class="small" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=' + p.lat.toFixed(5) + ',' + p.lon.toFixed(5) + '">' + p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) + ' ↗</a>';
   openSheet(isRecent ? 'Recent avalanche' : isHz ? 'Marker' : 'Known slide path', h, { view: 'pin' });
   map.panTo([p.lat, p.lon]);
 
   const sd = $('#pSend'); if (sd) sd.onclick = () => window.powderShare && powderShare.send({ pins: [p] }, isHz ? hazardOf(p.htype).label + ' marker' : isRecent ? 'Avalanche report' : 'Slide path');
+  const ml = $('#pMoveLocal'); if (ml) ml.onclick = () => { map.setView([p.lat, p.lon], Math.max(map.getZoom(), 15)); startPlacing({ moveLocal: p.id }); };
+  const um = $('#pUnmove'); if (um) um.onclick = () => { delete state.moved[p.id]; store.set('movedPins', state.moved); renderPins(); toast('Back at its original spot'); openPin(p.id); };
   const up = $('#unplace'); if (up) up.onclick = () => { delete state.placed[p.id]; store.set('placed', state.placed); renderPins(); closeSheet(); };
   const ed = $('#pEdit'); if (ed) ed.onclick = () => pinForm(p.kind, p.lat, p.lon, state.pins.find(x => x.id === p.id));
   const mv = $('#pMove'); if (mv) mv.onclick = () => { map.setView([p.lat, p.lon]); startPlacing({ movePin: p.id }); };

@@ -5,7 +5,7 @@ Backcountry avalanche map for Japan. Built-in areas: Hakuba, Myoko, Lotte Arai, 
 ## What it does
 
 - **GSI topo map** (国土地理院) with 10 m elevation data underneath.
-- **Area packs**: download only the areas you ride. Standard detail is roughly 10–25 MB per area, Detailed roughly 25–80 MB. Nothing else is stored.
+- **Area packs**: download only the areas you ride. Each pack includes the GSI HD aerial photo as an offline backup. Standard (to zoom 15) is roughly 25–65 MB per area, Detailed (to zoom 16) roughly 80–250 MB. Nothing else is stored.
 - **Your own areas**: Area menu → Add your own area. Frame it on the map, name it, pick the nearest JAN bulletin and band heights. Every area (built-in or yours) has Adjust box. Your areas travel with your shared pins file.
 - **Zoom**: down to a 10 m scale bar. Satellite mode switches to the sharp GSI aerial photo when you zoom in close (summer imagery, can be a few years old), and back to the latest Sentinel-2 pass when you zoom out. Close-up slope and aspect shading uses the 5 m GSI elevation survey where it exists (most mountain areas).
 - **Map**: three choices in Layers. **Latest satellite**: the newest clear Sentinel-2 pass over the area (10 m, for current snow cover; free from Microsoft Planetary Computer, no account). **HD photo**: GSI's sharp aerial photo (summer, can be a few years old) for close-up detail. **Topo**: GSI topo, which also sits under the satellite so gaps or no signal never show black, and is what works offline.

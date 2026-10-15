@@ -256,7 +256,7 @@
   checkHash();
 
   /* ---------- backup and restore ---------- */
-  const BACKUP_KEYS = ['reporterName', 'crew', 'satInstance', 'satLayerName', 'customAreas', 'bandOverrides', 'placed', 'recentWindow', 'show', 'routesVisible', 'hiddenRoutes', 'syncOn', 'base', 'area'];
+  const BACKUP_KEYS = ['reporterName', 'crew', 'satInstance', 'satLayerName', 'customAreas', 'bandOverrides', 'placed', 'recentWindow', 'show', 'routesVisible', 'hiddenRoutes', 'syncOn', 'base', 'area', 'movedPins'];
   function backupMeta() { const o = { deviceId, savedAt: new Date().toISOString().slice(0, 10) }; BACKUP_KEYS.forEach(k => { const v = store.get(k, undefined); if (v !== undefined) o[k] = v; }); return o; }
   function newBackupCode() { const a = new Uint8Array(16); crypto.getRandomValues(a); const c = [...a].map(b => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('').toUpperCase(); return 'PP-' + c.match(/.{4}/g).join('-'); }
   const cleanCode = t => { const m = String(t || '').toUpperCase().replace(/\s+/g, '').match(/PP-?([A-Z0-9]{4})-?([A-Z0-9]{4})-?([A-Z0-9]{4})-?([A-Z0-9]{4})/); return m ? 'PP-' + m.slice(1).join('-') : null; };
