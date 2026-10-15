@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.30';
+const APP_VERSION = '2026-10-15.31';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -779,6 +779,7 @@ $('#sheetClose2').addEventListener('click', closeSheet); // big Close at the bot
 const backNav = { guard: false, skip: 0, planWarned: 0 };
 function topOpen() {
   if (document.querySelector('.leaflet-popup')) return 'popup';
+  if (!$('#keyPanel').hidden) return 'key';
   if (!$('#sheet').hidden) return 'sheet';
   if (!$('#placeBar').hidden) return 'place';
   if (!$('#boxBar').hidden) return 'box';
@@ -794,7 +795,8 @@ window.addEventListener('popstate', () => {
   if (backNav.skip) { backNav.skip--; return; }
   backNav.guard = false;
   const t = topOpen();
-  if (t === 'popup') map.closePopup();
+  if (t === 'key') toggleKey(false);
+  else if (t === 'popup') map.closePopup();
   else if (t === 'sheet') closeSheet();
   else if (t === 'place') $('#placeCancel').click();
   else if (t === 'box') $('#boxCancel').click();
@@ -1533,6 +1535,60 @@ async function doUpdate() {
 $('#updateBtn').addEventListener('click', doUpdate);
 // Only checked when the app is opened (and from Settings). Nothing ever updates by itself while you're using it.
 setTimeout(() => checkForUpdate(false), 5000);
+
+/* ------------------------------------------------------------------ map key
+   Small key on the left: what the GSI topo symbols mean, plus this app's own markers and lines. */
+function keyHtml() {
+  const sv = (w, body) => '<svg viewBox="0 0 40 20" width="' + (w || 40) + '" height="20" aria-hidden="true">' + body + '</svg>';
+  const row = (icon, label, ja) => '<div class="key-row"><span class="key-ico">' + icon + '</span><span>' + label + (ja ? ' <span class="muted" lang="ja">' + ja + '</span>' : '') + '</span></div>';
+  const brown = '#b3654a', blue = '#2e86de', ink = '#333';
+  let t = '<div class="key-head"><b>Map key</b><button type="button" class="icon-btn" id="keyClose" aria-label="Close map key" title="Close">✕</button></div><div class="key-body">';
+  t += '<p class="key-sec">Topo map (GSI)</p>' +
+    row(sv(40, '<path d="M2 14 C12 6 26 18 38 8" fill="none" stroke="' + brown + '" stroke-width="1"/>'), 'Contour line, every 10 m', '等高線') +
+    row(sv(40, '<path d="M2 14 C12 6 26 18 38 8" fill="none" stroke="' + brown + '" stroke-width="2.2"/>'), 'Thick contour, every 50 m', '計曲線') +
+    row(sv(40, '<path d="M2 12 H38" stroke="' + brown + '" stroke-width="2"/>' + [5, 11, 17, 23, 29, 35].map(x => '<path d="M' + x + ' 12 l2 5" stroke="' + brown + '" stroke-width="1.4"/>').join('')), 'Cliff (teeth point downhill)', '崖') +
+    row(sv(40, '<g fill="#777">' + [[8, 7], [16, 13], [24, 6], [31, 12], [12, 15]].map(([x, y]) => '<path d="M' + x + ' ' + y + ' l3 -4 l3 4 z"/>').join('') + '</g>'), 'Rocky ground', '岩') +
+    row(sv(40, '<path d="M14 16 L20 5 L26 16 Z" fill="none" stroke="' + ink + '" stroke-width="1.4"/><circle cx="20" cy="12" r="1.4" fill="' + ink + '"/>'), 'Survey point / summit, with height', '三角点') +
+    row(sv(40, '<circle cx="20" cy="10" r="2" fill="' + ink + '"/>'), 'Spot height', '標高点') +
+    row(sv(40, '<path d="M2 10 H38" stroke="' + ink + '" stroke-width="1.3" stroke-dasharray="4 3"/>'), 'Walking trail', '徒歩道') +
+    row(sv(40, '<path d="M2 7 H38 M2 13 H38" stroke="' + ink + '" stroke-width="1.2"/>'), 'Road', '道路') +
+    row(sv(40, '<path d="M2 10 H38" stroke="' + ink + '" stroke-width="1.2"/>' + [8, 16, 24, 32].map(x => '<path d="M' + x + ' 6 V14" stroke="' + ink + '" stroke-width="1.2"/>').join('')), 'Lift / ropeway', '索道') +
+    row(sv(40, '<path d="M2 12 C10 6 18 16 26 9 S36 10 38 8" fill="none" stroke="' + blue + '" stroke-width="1.6"/>'), 'River or creek (may be open water under snow)', '川') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#7d4ea3" stroke-width="1.4" stroke-dasharray="7 2 1.5 2"/>'), 'Town / prefecture boundary', '境界') +
+    row(sv(40, '<text x="20" y="15" text-anchor="middle" font-size="14" fill="' + ink + '">♨</text>'), 'Hot spring', '温泉') +
+    row(sv(40, '<text x="20" y="15" text-anchor="middle" font-size="13" fill="' + ink + '">⛩</text>'), 'Shrine', '神社') +
+    row(sv(40, '<text x="20" y="15" text-anchor="middle" font-size="13" fill="' + ink + '">卍</text>'), 'Temple', '寺院') +
+    row(sv(40, '<g fill="none" stroke="#3c8d40" stroke-width="1.3"><circle cx="13" cy="8" r="3"/><path d="M13 11 V15"/><path d="M24 15 L27 6 L30 15"/></g>'), 'Broadleaf / conifer forest', '広葉樹林 / 針葉樹林') +
+    row(sv(40, '<g stroke="#8a8a4a" stroke-width="1.3" fill="none"><path d="M12 15 V9 M16 15 V7 M20 15 V9"/><path d="M11 15 H21"/></g>'), 'Scrub / wasteland', '荒地') +
+    row(sv(40, '<path d="M2 10 H38" stroke="' + ink + '" stroke-width="3"/><path d="M2 10 H38" stroke="#fff" stroke-width="1.6" stroke-dasharray="5 5"/>'), 'Railway', '鉄道');
+  t += '<p class="key-sec">This app</p>' +
+    row(SKULL.replace('width="34" height="34"', 'width="20" height="20"'), 'Known slide path or past incident') +
+    row(PATH.replace('width="34" height="34"', 'width="20" height="20"'), 'Recent avalanche') +
+    row('<span class="hz-pin tiny" style="background:#d97706">' + hazardSvg('rocks', 12) + '</span>', 'Hazard marker (amber hazard, red keep out, blue water, green good to know)') +
+    row('<span class="poi tiny wild">♨</span>', 'Natural mountain onsen') +
+    row('<span class="poi tiny onsen">♨</span>', 'Town onsen') +
+    row('<span class="poi tiny parking">P</span>', 'Parking') +
+    row('<span class="poi tiny hut">▲</span>', 'Mountain hut') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#1f9d55" stroke-width="3"/>'), 'Ski run: easy') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#d42a2a" stroke-width="3"/>'), 'Ski run: intermediate') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#111" stroke-width="3"/>'), 'Ski run: advanced') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#475569" stroke-width="2"/><circle cx="4" cy="10" r="2.5" fill="#475569"/><circle cx="36" cy="10" r="2.5" fill="#475569"/>'), 'Lift (app layer)') +
+    row(sv(40, '<rect x="2" y="3" width="36" height="14" rx="2" fill="rgba(214,18,36,.6)"/>'), 'Red shading: stay off today') +
+    row(sv(40, '<rect x="2" y="3" width="36" height="14" rx="2" fill="rgba(247,148,30,.45)"/>'), 'Amber shading: only with good reason') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#fff" stroke-width="6"/><path d="M2 10 H38" stroke="#ff2bd6" stroke-width="3" stroke-dasharray="6 4"/>'), 'Planned route') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#fff" stroke-width="6"/><path d="M2 10 H38" stroke="#00b4ff" stroke-width="3"/>'), 'Recorded track') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#16a34a" stroke-width="3" stroke-dasharray="3 3"/>'), 'Suggested gentler line') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#ef4444" stroke-width="8" stroke-opacity=".45"/>'), 'Steep section glow (amber, red, purple = steeper)');
+  t += '<p class="small muted" style="margin:6px 0 0">Slope and aspect colours are explained in Layers and on the compass button.</p></div>';
+  return t;
+}
+function toggleKey(open) {
+  const p = $('#keyPanel'), b = $('#keyBtn');
+  open = open == null ? p.hidden : open;
+  if (open) { p.innerHTML = keyHtml(); $('#keyClose').onclick = () => toggleKey(false); }
+  p.hidden = !open; b.setAttribute('aria-expanded', open); b.classList.toggle('on', open);
+}
+$('#keyBtn').addEventListener('click', () => toggleKey());
 
 async function boot() {
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { }

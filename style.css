@@ -406,3 +406,27 @@ details summary { cursor: pointer; color: var(--muted); }
 .pick-ico { flex: 0 0 34px; width: 34px; display: grid; place-items: center; }
 .pick-ico .hz-pin.small { width: 24px; height: 24px; }
 .list-item.pick { grid-template-columns: auto 34px 1fr; }
+
+/* ---------- map key (left side) ---------- */
+.key-btn {
+  position: fixed; z-index: 999; left: max(12px, env(safe-area-inset-left, 0px)); top: calc(env(safe-area-inset-top, 0px) + 104px);
+  min-height: 36px; padding: 0 12px; border-radius: 18px; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); box-shadow: var(--shadow); font-weight: 700; font-size: 13px; cursor: pointer;
+}
+.key-btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.key-panel {
+  position: fixed; z-index: 1001; left: max(12px, env(safe-area-inset-left, 0px)); top: calc(env(safe-area-inset-top, 0px) + 146px);
+  width: min(290px, calc(100vw - 90px)); max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 250px); min-height: 160px;
+  display: flex; flex-direction: column; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
+}
+.key-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--line); }
+.key-head .icon-btn { width: 36px; height: 36px; font-size: 16px; }
+.key-body { overflow-y: auto; overscroll-behavior: contain; padding: 6px 12px 12px; font-size: 13px; line-height: 1.3; }
+.key-sec { margin: 8px 0 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.key-row { display: grid; grid-template-columns: 44px 1fr; gap: 8px; align-items: center; padding: 3px 0; }
+.key-ico { display: grid; place-items: center; min-height: 22px; }
+.poi.tiny { width: 20px; height: 20px; font-size: 11px; border-width: 1.5px; }
+.poi.tiny.wild, .poi.tiny.onsen { font-size: 12px; }
+body.planning .key-btn, body.recording .key-btn { display: none; }
+@media (min-width: 760px) { .key-panel { max-height: calc(100dvh - 200px); } }
