@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.32';
+const APP_VERSION = '2026-10-15.33';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -297,15 +297,20 @@ async function satFind(area) {
     const r = await fetch(PC + 'stac/v1/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error('The satellite archive isn\'t answering. Try again later.');
     const f = ((await r.json()).features || [])[0];
-    if (f) return { date: f.properties.datetime.slice(0, 10), cc: Math.round(f.properties['eo:cloud_cover']) };
+    if (f) return { date: f.properties.datetime.slice(0, 10), cc: Math.round(f.properties['eo:cloud_cover']), days, maxcc };
   }
   throw new Error('No clear satellite pass found for this area.');
 }
-async function satRegister(date) {
-  const key = 'satMosaic:' + date, cached = store.get(key, null);
+// One mosaic of the clear passes in that window, newest on top: where the newest pass has a gap (edge of its strip),
+// the next newest clear pass fills in, so there are no black holes.
+async function satRegister(found) {
+  const today = isoDay(new Date()), key = 'satMosaic:' + today + ':' + found.days + ':' + found.maxcc, cached = store.get(key, null);
   if (cached) return cached;
-  const next = isoDay(new Date(Date.parse(date) + 864e5));
-  const body = { collections: ['sentinel-2-l2a'], 'filter-lang': 'cql2-json', filter: { op: 'anyinteracts', args: [{ property: 'datetime' }, { interval: [date + 'T00:00:00Z', next + 'T00:00:00Z'] }] }, sortby: [{ field: 'eo:cloud_cover', direction: 'asc' }] };
+  const from = isoDay(new Date(Date.now() - found.days * 864e5)), to = isoDay(new Date(Date.now() + 864e5));
+  const body = { collections: ['sentinel-2-l2a'], 'filter-lang': 'cql2-json', filter: { op: 'and', args: [
+      { op: 'anyinteracts', args: [{ property: 'datetime' }, { interval: [from + 'T00:00:00Z', to + 'T00:00:00Z'] }] },
+      { op: '<=', args: [{ property: 'eo:cloud_cover' }, found.maxcc] }] },
+    sortby: [{ field: 'datetime', direction: 'desc' }] };
   const r = await fetch(PC + 'data/v1/mosaic/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error('The satellite archive isn\'t answering. Try again later.');
   const id = (await r.json()).id; store.set(key, id); return id;
@@ -313,7 +318,7 @@ async function satRegister(date) {
 function buildSatLayer(id) {
   if (sat.layer) map.removeLayer(sat.layer);
   sat.layer = L.tileLayer(PC + 'data/v1/mosaic/' + id + '/tiles/WebMercatorQuad/{z}/{x}/{y}@1x?collection=sentinel-2-l2a&assets=visual&asset_bidx=visual%7C1%2C2%2C3&nodata=0&format=png', {
-    maxZoom: 20, maxNativeZoom: 14, minZoom: 6, zIndex: 2, crossOrigin: true,
+    maxZoom: 20, maxNativeZoom: 14, minZoom: 10, zIndex: 2, crossOrigin: true,
     attribution: 'Contains modified Copernicus Sentinel data ' + new Date().getFullYear() + ' (Microsoft Planetary Computer)',
   }).addTo(map);
 }
@@ -332,7 +337,7 @@ async function ensureSat() {
       sat.busy = true; updateSatFlag();
       const found = await satFind(state.area);
       sat.date = found.date; sat.cc = found.cc;
-      buildSatLayer(await satRegister(found.date));
+      buildSatLayer(await satRegister(found));
       sat.loadedFor = state.area.id;
     }
   } catch (e) { sat.err = e.message; if (sat.layer) { map.removeLayer(sat.layer); sat.layer = null; } }
