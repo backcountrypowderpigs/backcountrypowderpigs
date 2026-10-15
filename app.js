@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-16.3';
+const APP_VERSION = '2026-10-16.4';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -1705,10 +1705,32 @@ async function showRescue() {
   $('#rsAgain').onclick = () => { state.meAt = 0; showRescue(); };
 }
 function callHtml() {
-  return '<div class="stack"><p class="eyebrow">Call for help</p><div class="btn-row"><a class="btn danger call" href="tel:110">Call 110<br><span>Police · mountain rescue</span></a><a class="btn danger call" href="tel:119">Call 119<br><span>Fire · ambulance</span></a></div>' +
+  return '<div class="stack"><p class="eyebrow">Call for help</p><div class="btn-row"><button type="button" class="btn danger call hold" data-tel="110"><i></i><b>Hold to call 110</b><span>Police · mountain rescue</span></button><button type="button" class="btn danger call hold" data-tel="119"><i></i><b>Hold to call 119</b><span>Fire · ambulance</span></button></div>' +
+    '<p class="small muted" style="margin:0">Press and hold for 3 seconds so a bump in your pocket can\'t call. Your phone then asks you to confirm the call.</p>' +
     '<p class="small muted" style="margin:0">Say <b>"sangaku sōnan"</b> (mountain accident). If they only speak Japanese, read out or show the message below. If you have no signal, try higher ground or send a message instead; texts can slip through when calls can\'t.</p></div>';
 }
-function wireCall() { }
+// Hold-to-call: press and hold 3 s (the button fills up); letting go early cancels. Stops pocket calls.
+const HOLD_MS = 3000;
+function wireCall() {
+  document.querySelectorAll('#sheetBody .call.hold').forEach(b => {
+    let timer = null, start = 0, raf = 0;
+    const fill = b.querySelector('i');
+    const reset = (msg) => { clearTimeout(timer); cancelAnimationFrame(raf); timer = null; fill.style.width = '0'; b.classList.remove('holding'); if (msg) toast(msg, 1600); };
+    const tick = () => { const f = Math.min(1, (Date.now() - start) / HOLD_MS); fill.style.width = (f * 100) + '%'; if (timer) raf = requestAnimationFrame(tick); };
+    const down = e => {
+      e.preventDefault(); if (timer) return;
+      start = Date.now(); b.classList.add('holding');
+      timer = setTimeout(() => { timer = null; fill.style.width = '100%'; b.dataset.called = String(Date.now()); if (navigator.vibrate) navigator.vibrate(200); location.href = 'tel:' + b.dataset.tel; setTimeout(() => reset(), 1500); }, HOLD_MS);
+      tick();
+    };
+    const up = () => { if (timer) reset('Keep holding for 3 seconds to call ' + b.dataset.tel); };
+    b.addEventListener('pointerdown', down);
+    b.addEventListener('pointerup', up); b.addEventListener('pointerleave', up); b.addEventListener('pointercancel', up);
+    b.addEventListener('contextmenu', e => e.preventDefault());
+    b.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) down(e); });
+    b.addEventListener('keyup', e => { if (e.key === 'Enter' || e.key === ' ') up(); });
+  });
+}
 $('#sosBtn').addEventListener('click', showRescue);
 
 /* ------------------------------------------------------------------ data refresh button (left side)

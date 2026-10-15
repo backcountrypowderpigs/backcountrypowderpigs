@@ -472,3 +472,8 @@ body.planning .sos-btn { display: none; }
 @keyframes dataspin { to { transform: rotate(360deg); } }
 body.planning .data-btn, body.recording .data-btn { display: none; }
 .key-panel { top: calc(env(safe-area-inset-top, 0px) + 200px); max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 300px); }
+.btn.call.hold { position: relative; overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; }
+.btn.call.hold b { position: relative; font-size: 17px; }
+.btn.call.hold span { position: relative; display: block; }
+.btn.call.hold i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: rgba(255,255,255,.35); pointer-events: none; }
+.btn.call.hold.holding { transform: scale(.98); }
