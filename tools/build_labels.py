@@ -14,7 +14,7 @@ OUT = os.path.join(ROOT, 'data', 'labels')
 UA = {'User-Agent': 'BackcountryPowderPigs/1.0 (github.com/backcountrypowderpigs)'}
 PBF = 'https://cyberjapandata.gsi.go.jp/xyz/optimal_bvmap-v1/{z}/{x}/{y}.pbf'
 PMT = 'https://cyberjapandata.gsi.go.jp/xyz/optimal_bvmap-v1/optimal_bvmap-v1.pmtiles'
-VZ = 13  # vector zoom 13 = the names shown on raster zoom 14
+VZ = 14  # vector zoom 14 = the names shown on raster zoom 15 (all the small creeks and gullies)
 kks = pykakasi.kakasi()
 
 # GSI annotation codes -> what kind of name it is
@@ -41,6 +41,7 @@ KIND_EN = {'peak': 'peak', 'range': 'mountains', 'pass': 'pass', 'plateau': 'pla
 
 
 def hep(text):
+    text = re.sub(r'(?<=[\u4e00-\u9fff])[ヶケが](?=[\u4e00-\u9fff])', 'が', text)  # 槍ヶ岳 -> yari-ga-take
     s = ' '.join(x['hepburn'] for x in kks.convert(text)).strip()
     s = re.sub(r'ou', 'o', s); s = re.sub(r'uu', 'u', s); s = re.sub(r'\s+', '', s)
     return s[:1].upper() + s[1:]
@@ -52,6 +53,8 @@ def english(ja, kind):
     for k, rd, en in SUFFIX:
         if ja.endswith(k) and len(ja) > len(k):
             stem = ja[:-len(k)]
+            if stem[-1] in 'ヶケが':  # 槍ヶ岳 -> Yarigatake
+                return hep(stem[:-1]) + 'ga' + rd.replace('dake', 'take'), en
             return (hep(stem) + rd if rd else hep(stem)), en
     return hep(ja), KIND_EN.get(kind, '')
 
@@ -98,8 +101,22 @@ def fetch_tile(z, x, y):
         return None
 
 
+def osm_english(area_id):
+    """English names OpenStreetMap already has (better than a guessed reading), by Japanese name."""
+    try:
+        d = json.load(open(os.path.join(ROOT, 'data', 'places', area_id + '.json'), encoding='utf-8'))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for x in (d.get('labels') or []) + (d.get('points') or []):
+        if x.get('ja') and x.get('en'):
+            out[x['ja']] = x['en']
+    return out
+
+
 def build(area):
     out, seen, shown_keys = [], set(), False
+    known = osm_english(area['id'])
     for (z, x, y) in tiles(area['bounds'], VZ):
         data = fetch_tile(z, x, y)
         if not data:
@@ -136,6 +153,8 @@ def build(area):
             en, gloss = english(ja, kind)
             if kana:
                 en = hep(kana)
+            if ja in known:
+                en = known[ja]
             out.append({'ja': ja, 'en': en, 'g': gloss, 'k': kind, 'lat': round(lat, 5), 'lon': round(lon, 5)})
         time.sleep(0.05)
     return {'v': 1, 'source': '国土地理院最適化ベクトルタイル (GSI)', 'labels': out}
