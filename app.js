@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.19';
+const APP_VERSION = '2026-10-15.20';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -772,6 +772,43 @@ function openSheet(title, html, opts = {}) {
 }
 function closeSheet() { $('#sheet').hidden = true; state.view = null; }
 $('#sheetClose').addEventListener('click', closeSheet);
+
+/* Phone back button / back swipe: closes whatever is open (pop-up, panel, pin drop, box adjust, route plan)
+   instead of leaving the app. Works the same on Android (back button) and iPhone (browser back). */
+const backNav = { guard: false, skip: 0, planWarned: 0 };
+function topOpen() {
+  if (document.querySelector('.leaflet-popup')) return 'popup';
+  if (!$('#sheet').hidden) return 'sheet';
+  if (!$('#placeBar').hidden) return 'place';
+  if (!$('#boxBar').hidden) return 'box';
+  if (document.body.classList.contains('planning')) return 'plan';
+  return null;
+}
+function syncBackGuard() {
+  const open = !!topOpen();
+  if (open && !backNav.guard) { history.pushState({ bpp: 1 }, ''); backNav.guard = true; }
+  else if (!open && backNav.guard) { backNav.guard = false; backNav.skip++; history.back(); }
+}
+window.addEventListener('popstate', () => {
+  if (backNav.skip) { backNav.skip--; return; }
+  backNav.guard = false;
+  const t = topOpen();
+  if (t === 'popup') map.closePopup();
+  else if (t === 'sheet') closeSheet();
+  else if (t === 'place') $('#placeCancel').click();
+  else if (t === 'box') $('#boxCancel').click();
+  else if (t === 'plan') {
+    const pts = document.querySelectorAll('.vertex').length;
+    if (pts && Date.now() - backNav.planWarned > 4000) { backNav.planWarned = Date.now(); toast('Press back again to throw away this route plan', 3000); }
+    else { const c = $('#pCancel'); if (c) c.click(); }
+  }
+  setTimeout(syncBackGuard, 0);
+});
+let backSyncT = null;
+new MutationObserver(() => { clearTimeout(backSyncT); backSyncT = setTimeout(syncBackGuard, 50); })
+  .observe(document.body, { attributes: true, attributeFilter: ['hidden', 'class'], subtree: true, childList: true });
+map.on('popupopen popupclose', () => setTimeout(syncBackGuard, 0));
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && topOpen()) history.back(); });
 (function grip() { let y0 = null; const g = $('#sheetGrip'); g.addEventListener('touchstart', e => { y0 = e.touches[0].clientY; }, { passive: true }); g.addEventListener('touchend', e => { if (y0 != null && e.changedTouches[0].clientY - y0 > 60) closeSheet(); y0 = null; }); })();
 
 function ratingPill(r) { return '<span class="band-pill r' + (r || 0) + '">' + RATING_NAMES[r || 0] + '</span>'; }
@@ -1453,6 +1490,7 @@ addHoverTitles(document);
 new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) { addHoverTitles(n); if (n.matches && n.matches('button[aria-label]:not([title])')) n.title = n.getAttribute('aria-label'); } }))).observe(document.body, { childList: true, subtree: true });
 
 async function boot() {
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { }
   try {
     const [ar, sl] = await Promise.all([fetch('data/areas.json').then(r => r.json()), fetch('data/known-slides.json').then(r => r.json())]);
     fetch('data/natural-onsens.json').then(r => r.json()).then(d => { state.wildSeeds = d.onsens || []; if (state._pois) renderPois(); }).catch(() => { });
