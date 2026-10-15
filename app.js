@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.24';
+const APP_VERSION = '2026-10-15.25';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
