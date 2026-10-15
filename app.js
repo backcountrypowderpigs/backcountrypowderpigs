@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.28';
+const APP_VERSION = '2026-10-15.29';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -1508,7 +1508,8 @@ addHoverTitles(document);
 new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) { addHoverTitles(n); if (n.matches && n.matches('button[aria-label]:not([title])')) n.title = n.getAttribute('aria-label'); } }))).observe(document.body, { childList: true, subtree: true });
 
 /* ------------------------------------------------------------------ updates
-   Checks for a newer version (on open, when you come back to the app, every 30 min) and shows an Update button.
+   Opening the app loads the newest version. If one comes out while it's open, an Update button shows (checked on open
+   and from Settings); the app never reloads itself mid-use.
    Updating only reloads the app's own files; your pins, routes, tracks and settings stay on the phone,
    and they're backed up first if you have signal. */
 const updater = { latest: null };
@@ -1530,8 +1531,7 @@ async function doUpdate() {
   location.reload();
 }
 $('#updateBtn').addEventListener('click', doUpdate);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(false); });
-setInterval(() => { if (!document.hidden) checkForUpdate(false); }, 30 * 60 * 1000);
+// Only checked when the app is opened (and from Settings). Nothing ever updates by itself while you're using it.
 setTimeout(() => checkForUpdate(false), 5000);
 
 async function boot() {
@@ -1554,7 +1554,8 @@ async function boot() {
     // Always check for a new version, and when one takes over, reload once so old and new files never mix.
     const hadController = !!navigator.serviceWorker.controller;
     let reloaded = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+    // A new version took over in the background: don't reload under the rider, just offer the Update button.
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; $('#updateBtn').hidden = false; } });
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => { });
   }
 }
