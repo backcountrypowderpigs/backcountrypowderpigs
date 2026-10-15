@@ -47,6 +47,8 @@ Through a free Google Firebase (Firestore) database, whenever a phone has signal
 
 Each phone signs in anonymously, and `firestore.rules` only lets a phone change or delete its own things. Crew data is only readable with the crew code from the invite. Riders can turn sync off in Settings.
 
+**Backup:** everything on a phone (all pins, every route and track including "Just me" ones, and settings) is also backed up privately under that phone's secret backup code, shown in Settings → Backup. App updates never touch saved data; the backup is for a lost or new phone, or after deleting the home-screen app. Restore by typing the code in Settings → Backup. There's also a backup file option that works with no signal.
+
 Setup (once):
 1. console.firebase.google.com → Add project (Analytics off).
 2. Build → Authentication → Get started → Sign-in method → Anonymous → Enable.

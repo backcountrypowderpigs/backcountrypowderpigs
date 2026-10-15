@@ -33,6 +33,13 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.serverAt == request.time;
     }
+    // Private backups: only readable or writable with the secret backup code (it's never shared by the app).
+    match /backups/{code}/items/{id} {
+      allow read: if signedIn() && code.size() >= 20;
+      allow create, update: if signedIn() && code.size() >= 20 && id.size() < 64
+        && request.resource.data.keys().hasOnly(['json', 'uid', 'deleted', 'kind', 'serverAt'])
+        && request.resource.data.kind in ['pin', 'route', 'meta'] && base(900000);
+    }
     match /crews/{code}/items/{id} {
       allow read: if signedIn() && code.size() >= 16;
       allow create: if signedIn() && code.size() >= 16 && id.size() < 64
