@@ -1664,12 +1664,13 @@ async function nearbyNames(lat, lon) {
   const area = areaFor(lat, lon) || state.area;
   const names = area ? await loadNames(area) : [];
   const osm = ((await loadPois(area).catch(() => null)) || {}).labels || [];
-  const pool = names.filter(n => ['water', 'river', 'waterfall', 'lake', 'peak', 'pass', 'terrain', 'plateau', 'place', 'town', 'onsen'].includes(n.k))
+  // (town/municipality names are printed in the middle of big areas, not at the town, so they're left out)
+  const pool = names.filter(n => ['water', 'river', 'waterfall', 'lake', 'peak', 'pass', 'terrain', 'plateau', 'place', 'onsen'].includes(n.k))
     .map(n => ({ ja: n.ja, en: n.en + (n.g ? ' (' + n.g + ')' : ''), k: n.k, lat: n.lat, lon: n.lon }))
     .concat(osm.filter(o => ['peak', 'resort', 'saddle', 'place', 'station'].includes(o.c)).map(o => ({ ja: o.ja || o.name, en: englishFor(o), k: o.c === 'resort' ? 'resort' : o.c === 'saddle' ? 'pass' : o.c, lat: o.lat, lon: o.lon })));
   const d = x => map.distance([lat, lon], [x.lat, x.lon]);
   const pick = kinds => pool.filter(x => kinds.includes(x.k)).sort((a, b) => d(a) - d(b))[0];
-  const out = [pick(['water', 'river', 'waterfall', 'lake']), pick(['peak', 'pass', 'terrain', 'plateau']), pick(['resort', 'place', 'town', 'station', 'onsen'])].filter(Boolean);
+  const out = [pick(['water', 'river', 'waterfall', 'lake']), pick(['peak', 'pass', 'terrain', 'plateau']), pick(['resort', 'place', 'station', 'onsen'])].filter(Boolean);
   return out.map(x => ({ ...x, dist: d(x), b: bearingIdx([x.lat, x.lon], [lat, lon]) }));
 }
 const kmTxt = m => m < 1000 ? Math.round(m / 10) * 10 + ' m' : (m / 1000).toFixed(1) + ' km';
