@@ -1,0 +1,29 @@
+rules_version = '2';
+// Live sync rules for Backcountry Powder Pigs.
+// Anyone can read pins and checks. A phone can only create or change its own (matched by its anonymous sign-in id).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function okPin() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['json', 'uid', 'deleted', 'serverAt'])
+        && d.json is string && d.json.size() < 10000
+        && d.uid == request.auth.uid && d.deleted is bool && d.serverAt == request.time;
+    }
+    match /pins/{id} {
+      allow read: if true;
+      allow create: if signedIn() && id.size() < 64 && okPin();
+      allow update: if signedIn() && resource.data.uid == request.auth.uid && okPin();
+    }
+    match /checks/{id} {
+      allow read: if true;
+      allow create, update: if signedIn()
+        && id == request.resource.data.pin + '__' + request.auth.uid
+        && request.resource.data.keys().hasOnly(['pin', 'json', 'uid', 'serverAt'])
+        && request.resource.data.pin is string && request.resource.data.pin.size() < 64
+        && request.resource.data.json is string && request.resource.data.json.size() < 2000
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.serverAt == request.time;
+    }
+  }
+}

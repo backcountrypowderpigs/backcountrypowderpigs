@@ -38,6 +38,18 @@ Backcountry avalanche map for Japan. Built-in areas: Hakuba, Myoko, Lotte Arai, 
 5. On your phone open that link, then **Share → Add to Home Screen** (iPhone) or **Install app** (Android).
 6. On Wi-Fi, tap the download button and save the areas you're riding.
 
+## Live sync (everyone's pins on every phone)
+
+Slide reports, slide paths, hazard markers and checks sync through a free Google Firebase (Firestore) database whenever a phone has signal; with no signal the app works as normal and catches up later. Routes and tracks stay private (send them by link). Each phone signs in anonymously, and the rules in `firestore.rules` only let a phone change or delete its own pins. Riders can turn it off in Settings → Live sync.
+
+Setup (once):
+1. console.firebase.google.com → Add project (Analytics off).
+2. Build → Authentication → Get started → Sign-in method → Anonymous → Enable.
+3. Build → Firestore Database → Create database → location `asia-northeast1` (Tokyo) → Production mode. Then the Rules tab: paste `firestore.rules` → Publish.
+4. Project settings (gear) → Your apps → Web `</>` → register (no hosting). Copy `apiKey` and `projectId` into `data/sync.json`.
+
+The free plan (50,000 reads and 20,000 writes a day) is far more than a crew needs. The web API key is public by design; the rules are what protect the data.
+
 ## Adding a built-in area
 
 Edit `data/areas.json`: copy an entry, give it a new `id`, a box (`bounds: [[south, west], [north, east]]`), the JAN `region` whose bulletin covers it, band heights, and any resort links. Regions are listed at the top of that file. Seed known slide paths for it in `data/known-slides.json`.

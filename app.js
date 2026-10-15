@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.22';
+const APP_VERSION = '2026-10-15.23';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -1307,6 +1307,7 @@ function openPin(id) {
   const mv = $('#pMove'); if (mv) mv.onclick = () => { map.setView([p.lat, p.lon]); startPlacing({ movePin: p.id }); };
   const dl = $('#pDel'); if (dl) dl.onclick = () => {
     if (!dl.dataset.armed) { dl.dataset.armed = '1'; dl.textContent = 'Tap again to delete'; dl.classList.add('danger'); return; }
+    if (window.powderSync) powderSync.deleted(p);
     state.pins = state.pins.filter(x => x.id !== p.id); savePins(); renderPins(); closeSheet(); toast('Pin deleted');
   };
   const verify = (v, reason, note) => {
@@ -1406,6 +1407,7 @@ function showSettings() {
     '<button class="btn primary" id="sLink">Send routes and markers to a mate…</button>' +
     '<div class="field"><label for="s-paste">Got a link? Paste it here</label><input type="text" id="s-paste" autocomplete="off" spellcheck="false" placeholder="https://backcountrypowderpigs.github.io/…#s=…"></div><button class="btn" id="sPaste">Open link</button>' +
     '<details class="small"><summary>Share as a file instead</summary><div class="btn-row" style="margin-top:8px"><button class="btn" id="sExport">Share all my pins as a file (' + state.pins.length + ')</button><button class="btn" id="sImport">Import pins file</button></div></details></div>';
+  if (window.powderSync) h += powderSync.html();
   h += '<div class="stack"><p class="eyebrow">Latest satellite (Sentinel-2)</p><p class="small muted" style="margin:0">Free from the EU Copernicus programme. New passes every few days; the app picks the newest clear one. One-off setup, about 5 minutes:</p>' +
     '<ol class="small" style="margin:0;padding-left:20px;display:grid;gap:4px"><li>Make a free account at <a href="https://dataspace.copernicus.eu/" target="_blank" rel="noopener">dataspace.copernicus.eu</a>.</li><li>Open the Sentinel Hub dashboard from your account, then <b>Configuration Utility</b>.</li><li>Copy the ID of the <b>Simple WMS</b> instance (or create one from the Simple WMS template).</li><li>Paste it here.</li></ol>' +
     '<div class="field"><label for="s-sat">Copernicus instance ID</label><input type="text" id="s-sat" autocomplete="off" spellcheck="false" value="' + esc(satId()) + '" placeholder="e.g. 1a2b3c4d-…"></div><button class="btn" id="sSat">Save and show satellite</button></div>';
@@ -1423,6 +1425,7 @@ function showSettings() {
     state.base = 'sat'; store.set('base', 'sat'); closeSheet(); Promise.resolve(setBase()).then(() => toast(sat.err || 'Satellite on'));
   };
   $('#sExport').onclick = exportPins;
+  if (window.powderSync) powderSync.wire();
   $('#sLink').onclick = () => window.powderShare && powderShare.picker();
   $('#sPaste').onclick = () => { const v = $('#s-paste').value.trim(); if (window.powderShare) powderShare.openText(v); };
   $('#sHelp').onclick = showHelp;
