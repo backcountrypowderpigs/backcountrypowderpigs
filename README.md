@@ -8,7 +8,7 @@ Backcountry avalanche map for Japan. Built-in areas: Hakuba, Myoko, Lotte Arai, 
 - **Area packs**: download only the areas you ride. Standard detail is roughly 10–25 MB per area, Detailed roughly 25–80 MB. Nothing else is stored.
 - **Your own areas**: Area menu → Add your own area. Frame it on the map, name it, pick the nearest JAN bulletin and band heights. Every area (built-in or yours) has Adjust box. Your areas travel with your shared pins file.
 - **Zoom**: down to a 10 m scale bar. Satellite mode switches to the sharp GSI aerial photo when you zoom in close (summer imagery, can be a few years old), and back to the latest Sentinel-2 pass when you zoom out. Close-up slope and aspect shading uses the 5 m GSI elevation survey where it exists (most mountain areas).
-- **Map**: Latest satellite by default (Sentinel-2, 10 m, newest clear pass in the last 90 days, pick earlier passes by date; needs a free Copernicus account and signal). GSI topo underneath, and on its own when there's no signal.
+- **Map**: three choices in Layers. **Latest satellite**: the newest clear Sentinel-2 pass over the area (10 m, for current snow cover; free from Microsoft Planetary Computer, no account). **HD photo**: GSI's sharp aerial photo (summer, can be a few years old) for close-up detail. **Topo**: GSI topo, which also sits under the satellite so gaps or no signal never show black, and is what works offline.
 - **Aspect overlay** (compass button, or Layers → Aspect overlay): its own on/off layer that works alone or on top of danger or slope shading. Slopes 20°+ coloured by the way they face (N blue, E green, S yellow, W red and the in-betweens). "Match today's report" makes the aspects and heights the bulletin flags strong and the rest faint, for route planning. Tap aspects on or off.
 - **English labels** over the map: ski resorts, peaks with height, passes, ridges, valleys, villages and lakes, English with the Japanese underneath. Where OpenStreetMap has no English name, the label says what it is (Peak, Ridge, Pass). Layers also has a Japanese map-word glossary, since the topo map's own printing is Japanese.
 - **Routes**: plan a route by tapping the map (distance, climb, descent, Munter touring time, elevation profile, steepest slope and how much is on 30°+). Planned routes are dashed magenta.
@@ -60,12 +60,6 @@ The free plan (50,000 reads and 20,000 writes a day) is far more than a crew nee
 ## Adding a built-in area
 
 Edit `data/areas.json`: copy an entry, give it a new `id`, a box (`bounds: [[south, west], [north, east]]`), the JAN `region` whose bulletin covers it, band heights, and any resort links. Regions are listed at the top of that file. Seed known slide paths for it in `data/known-slides.json`.
-
-## Latest satellite setup
-
-1. Free account at dataspace.copernicus.eu.
-2. Sentinel Hub dashboard → Configuration Utility → copy the Simple WMS instance ID.
-3. In the app: Settings → Latest satellite → paste → Save.
 
 ## How the daily brief gets updated
 

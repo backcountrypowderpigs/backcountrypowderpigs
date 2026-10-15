@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.31';
+const APP_VERSION = '2026-10-15.32';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -270,10 +270,8 @@ L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
 map.attributionControl.setPrefix(false);
 const ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">GSI Japan</a> · POIs © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · Avalanche info: <a href="https://nadare.jp" target="_blank" rel="noopener">JAN</a>';
 const topo = L.tileLayer(GSI.std, { maxZoom: 20, maxNativeZoom: 18, attribution: ATTR, crossOrigin: true });
-// Close-up imagery for satellite mode: Sentinel-2 is 10 m pixels and goes soft past zoom 14,
-// so from zoom 15 the sharp GSI aerial photo takes over (summer imagery, can be a few years old).
-const SAT_SWITCH_Z = 15;
-const closeUp = L.tileLayer(GSI.photo, { minZoom: SAT_SWITCH_Z, maxZoom: 20, maxNativeZoom: 18, attribution: ATTR + ' · aerial photo: GSI', crossOrigin: true, zIndex: 3 });
+// HD photo: GSI's sharp aerial photo (summer imagery, can be a few years old), at every zoom.
+const hdPhoto = L.tileLayer(GSI.photo, { maxZoom: 20, maxNativeZoom: 18, attribution: ATTR + ' · aerial photo: GSI', crossOrigin: true, zIndex: 3 });
 const shadeLayer = new TerrainLayer({ maxZoom: 20, opacity: 1, zIndex: 300, classifier: shadeClassifier });
 const aspectLayer = new TerrainLayer({ maxZoom: 20, opacity: 1, zIndex: 310, classifier: aspectClassifier });
 function redrawShading() { shadeLayer.redraw(); aspectLayer.redraw(); }
@@ -284,70 +282,66 @@ const meLayer = L.layerGroup().addTo(map);
 const lineRenderer = L.canvas({ padding: 0.3 });
 let areaOutline = null;
 
-/* ---------- Latest satellite: Sentinel-2 via Copernicus Data Space (free account) ----------
-   Finds recent passes over the area with low cloud, newest first, and shows the chosen date.
-   10 m pixels: snow cover, ridgelines, forest edges and big debris; not tracks or cornices. */
-const SH = 'https://sh.dataspace.copernicus.eu/ogc/';
-const sat = { layer: null, layerName: store.get('satLayerName', ''), dates: [], date: null, err: '', loadedFor: null };
-const satId = () => (store.get('satInstance', '') || '').trim();
-function isoDay(d) { return d.toISOString().slice(0, 10); }
-function satRange() { const to = new Date(), from = new Date(Date.now() - 90 * 864e5); return [isoDay(from), isoDay(to)]; }
-async function satDiscover() {
-  if (sat.layerName) return;
-  const r = await fetch(SH + 'wms/' + encodeURIComponent(satId()) + '?SERVICE=WMS&REQUEST=GetCapabilities');
-  if (!r.ok) throw new Error(r.status === 401 || r.status === 403 || r.status === 404 ? 'Copernicus didn\'t accept that ID. Check it in Settings.' : 'Copernicus isn\'t answering. Try again later.');
-  const names = [...(await r.text()).matchAll(/<Layer[^>]*>\s*<Name>([^<]+)<\/Name>/g)].map(m => m[1]);
-  sat.layerName = names.find(n => /TRUE/i.test(n)) || names.find(n => /NATURAL/i.test(n)) || names[0] || '';
-  if (!sat.layerName) throw new Error('That Copernicus setup has no image layers. Use the "Simple WMS" instance.');
-  store.set('satLayerName', sat.layerName);
+/* ---------- Latest satellite: newest clear Sentinel-2 pass (no account needed) ----------
+   Microsoft Planetary Computer's free Sentinel-2 archive: find the newest pass over the area with little cloud,
+   then show just that pass. 10 m pixels, so it goes soft when you zoom right in (use HD photo for detail).
+   The topo sits underneath, so a gap or no signal shows the topo, never a black screen. */
+const PC = 'https://planetarycomputer.microsoft.com/api/';
+const sat = { layer: null, date: null, cc: null, err: '', loadedFor: null, busy: false };
+const isoDay = d => d.toISOString().slice(0, 10);
+async function satFind(area) {
+  const [[s, w], [n, e]] = area.bounds;
+  for (const [days, maxcc] of [[45, 10], [120, 25], [365, 40]]) {
+    const body = { collections: ['sentinel-2-l2a'], bbox: [w, s, e, n], datetime: isoDay(new Date(Date.now() - days * 864e5)) + 'T00:00:00Z/' + isoDay(new Date(Date.now() + 864e5)) + 'T00:00:00Z',
+      limit: 20, query: { 'eo:cloud_cover': { lt: maxcc } }, sortby: [{ field: 'properties.datetime', direction: 'desc' }] };
+    const r = await fetch(PC + 'stac/v1/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error('The satellite archive isn\'t answering. Try again later.');
+    const f = ((await r.json()).features || [])[0];
+    if (f) return { date: f.properties.datetime.slice(0, 10), cc: Math.round(f.properties['eo:cloud_cover']) };
+  }
+  throw new Error('No clear satellite pass found for this area.');
 }
-async function satFindDates(area) {
-  const toM = (lat, lon) => [lon * 20037508.34 / 180, Math.log(Math.tan((90 + lat) * Math.PI / 360)) * 20037508.34 / Math.PI];
-  const [x0, y0] = toM(area.bounds[0][0], area.bounds[0][1]), [x1, y1] = toM(area.bounds[1][0], area.bounds[1][1]);
-  const [from, to] = satRange();
-  sat.dates = [];
-  try {
-    const r = await fetch(SH + 'wfs/' + encodeURIComponent(satId()) + '?SERVICE=WFS&REQUEST=GetFeature&TYPENAMES=DSS2&SRSNAME=EPSG:3857&BBOX=' + [x0, y0, x1, y1].map(v => v.toFixed(0)).join(',') + '&TIME=' + from + '/' + to + '&MAXCC=60&MAXFEATURES=100&OUTPUTFORMAT=application/json');
-    const j = await r.json(); const by = {};
-    (j.features || []).forEach(f => { const p = f.properties || {}; const d = (p.date || '').slice(0, 10); const cc = Number(p.cloudCoverPercentage); if (!d) return; if (by[d] == null || cc < by[d]) by[d] = isFinite(cc) ? cc : 100; });
-    sat.dates = Object.entries(by).map(([d, cc]) => ({ d, cc })).sort((a, b) => b.d.localeCompare(a.d));
-  } catch (e) { sat.dates = []; }
-  const clear = sat.dates.find(x => x.cc <= 20) || sat.dates[0];
-  sat.date = clear ? clear.d : null; sat.loadedFor = area.id;
+async function satRegister(date) {
+  const key = 'satMosaic:' + date, cached = store.get(key, null);
+  if (cached) return cached;
+  const next = isoDay(new Date(Date.parse(date) + 864e5));
+  const body = { collections: ['sentinel-2-l2a'], 'filter-lang': 'cql2-json', filter: { op: 'anyinteracts', args: [{ property: 'datetime' }, { interval: [date + 'T00:00:00Z', next + 'T00:00:00Z'] }] }, sortby: [{ field: 'eo:cloud_cover', direction: 'asc' }] };
+  const r = await fetch(PC + 'data/v1/mosaic/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error('The satellite archive isn\'t answering. Try again later.');
+  const id = (await r.json()).id; store.set(key, id); return id;
 }
-function buildSatLayer() {
+function buildSatLayer(id) {
   if (sat.layer) map.removeLayer(sat.layer);
-  const [from, to] = satRange();
-  sat.layer = L.tileLayer.wms(SH + 'wms/' + encodeURIComponent(satId()), {
-    layers: sat.layerName, format: 'image/jpeg', uppercase: true, tileSize: 512, maxZoom: SAT_SWITCH_Z - 1, zIndex: 2,
-    time: sat.date ? sat.date + '/' + sat.date : from + '/' + to, maxcc: sat.date ? 100 : 20, showlogo: false,
-    attribution: 'Contains modified Copernicus Sentinel data ' + new Date().getFullYear(),
+  sat.layer = L.tileLayer(PC + 'data/v1/mosaic/' + id + '/tiles/WebMercatorQuad/{z}/{x}/{y}@1x?collection=sentinel-2-l2a&assets=visual&asset_bidx=visual%7C1%2C2%2C3&nodata=0&format=png', {
+    maxZoom: 20, maxNativeZoom: 14, minZoom: 6, zIndex: 2, crossOrigin: true,
+    attribution: 'Contains modified Copernicus Sentinel data ' + new Date().getFullYear() + ' (Microsoft Planetary Computer)',
   }).addTo(map);
-  updateSatFlag();
 }
 function updateSatFlag() {
   const f = $('#satFlag');
+  if (state.base === 'hd') { f.textContent = 'HD photo · summer, not current'; f.hidden = false; return; }
   if (state.base !== 'sat') { f.hidden = true; return; }
-  if (map.getZoom() >= SAT_SWITCH_Z && navigator.onLine) { f.textContent = 'Close-up: sharp aerial photo (summer, not current)'; f.hidden = false; return; }
-  if (!satId()) { f.textContent = 'Satellite: tap to set up'; f.hidden = false; return; }
-  const cur = sat.dates.find(x => x.d === sat.date);
-  f.textContent = sat.err ? 'Satellite unavailable' : sat.date ? 'Satellite ' + fmtDate(sat.date) + (cur ? ' · ' + Math.round(cur.cc) + '% cloud' : '') : 'Satellite: latest clear, last 90 days';
+  f.textContent = sat.err ? 'Satellite unavailable · showing topo' : sat.busy ? 'Finding the latest clear satellite pass…' : sat.date ? 'Satellite ' + fmtDate(sat.date) + (map.getZoom() > 14 ? ' · zoom out for sharper, or HD photo' : '') : 'Satellite';
   f.hidden = false;
 }
 async function ensureSat() {
   sat.err = '';
-  if (!satId()) { updateSatFlag(); return; }
   try {
-    if (!navigator.onLine) throw new Error('No signal, so showing the topo map. Satellite comes back when you have signal.');
-    await satDiscover();
-    if (sat.loadedFor !== state.area.id) await satFindDates(state.area);
-    buildSatLayer();
-  } catch (e) { sat.err = e.message; if (sat.layer) { map.removeLayer(sat.layer); sat.layer = null; } updateSatFlag(); }
+    if (!navigator.onLine) throw new Error('No signal');
+    if (sat.loadedFor !== state.area.id || !sat.layer) {
+      sat.busy = true; updateSatFlag();
+      const found = await satFind(state.area);
+      sat.date = found.date; sat.cc = found.cc;
+      buildSatLayer(await satRegister(found.date));
+      sat.loadedFor = state.area.id;
+    }
+  } catch (e) { sat.err = e.message; if (sat.layer) { map.removeLayer(sat.layer); sat.layer = null; } }
+  sat.busy = false; updateSatFlag();
 }
-
 function setBase() {
-  if (sat.layer && state.base !== 'sat') { map.removeLayer(sat.layer); sat.layer = null; }
-  if (state.base === 'sat') { if (!map.hasLayer(closeUp)) closeUp.addTo(map); } else if (map.hasLayer(closeUp)) map.removeLayer(closeUp);
+  if (!['sat', 'hd', 'topo'].includes(state.base)) state.base = 'sat';
+  if (sat.layer && state.base !== 'sat') { map.removeLayer(sat.layer); sat.layer = null; sat.loadedFor = null; }
+  if (state.base === 'hd') { if (!map.hasLayer(hdPhoto)) hdPhoto.addTo(map); } else if (map.hasLayer(hdPhoto)) map.removeLayer(hdPhoto);
   if (!map.hasLayer(topo)) topo.addTo(map);
   shadeLayer.addTo(map); aspectLayer.addTo(map);
   updateNativeZoom();
@@ -906,16 +900,10 @@ function showLayers() {
   const b = bulletinFor(state.area.id);
   const seg = (name, cur, opts) => '<div class="seg" data-seg="' + name + '">' + opts.map(([v, l]) => '<button type="button" data-v="' + v + '" class="' + (cur === v ? 'on' : '') + '">' + l + '</button>').join('') + '</div>';
   const tog = (k, l) => '<label class="row"><input type="checkbox" data-show="' + k + '"' + (state.show[k] ? ' checked' : '') + '> ' + l + '</label>';
-  let h = '<div class="field"><span class="lbl">Map</span>' + seg('base', state.base, [['sat', 'Latest satellite'], ['topo', 'Topo']]);
-  if (state.base === 'sat') {
-    if (!satId()) h += '<div class="card warn small"><b>One-off setup needed.</b><span>Sentinel-2 images come from the EU\'s free Copernicus service and need a free account. Settings → Latest satellite has the steps.</span><button class="btn small" id="goSatSetup">Set it up</button></div>';
-    else if (sat.err) h += '<div class="card warn small">' + esc(sat.err) + '</div>';
-    else {
-      h += '<span class="help">Sentinel-2, 10 m pixels. Shows snow cover, ridgelines, forest edges and big debris; not tracks or cornices. Needs signal; with no signal the topo shows instead. Cloud % is for the whole 100 km scene, so check your valley and step back a pass if it\'s clouded.</span>';
-      if (sat.dates.length) h += '<div class="chips" data-chips="satdate">' + sat.dates.slice(0, 10).map(x => '<button type="button" data-v="' + x.d + '" class="' + (x.d === sat.date ? 'on' : '') + '">' + new Date(x.d).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' · ' + Math.round(x.cc) + '%</button>').join('') + '</div>';
-      else h += '<span class="help">Couldn\'t list the passes, so it\'s showing the newest image under 20% cloud from the last 90 days.</span>';
-    }
-  }
+  let h = '<div class="field"><span class="lbl">Map</span>' + seg('base', state.base, [['sat', 'Latest satellite'], ['hd', 'HD photo'], ['topo', 'Topo']]);
+  if (state.base === 'sat') h += sat.err ? '<div class="card warn small">' + esc(sat.err === 'No signal' ? 'No signal, so the topo map is showing. The satellite comes back when you have signal.' : sat.err) + '</div>'
+    : '<span class="help">The newest clear satellite pass' + (sat.date ? ' (' + fmtDate(sat.date) + ')' : '') + ', for current snow cover. 10 m detail: ridgelines, forest edges, big debris; it goes soft when you zoom right in. Needs signal.</span>';
+  if (state.base === 'hd') h += '<span class="help">Sharp aerial photo for close-up detail of trees, gullies and rocks. Taken in summer and can be a few years old, so no snow. Needs signal.</span>';
   h += '</div>';
   h += '<div class="field"><span class="lbl">Shading</span>' + seg('shade', state.shade, [['danger', 'Today\'s danger'], ['slope', 'Slope angle'], ['off', 'Off']]) + '</div>';
   if (state.shade === 'danger' && eff !== 'danger') h += '<div class="card warn small">No danger rating for ' + esc(state.area.name) + ' right now' + (b && b.status === 'off-season' ? ' (off season)' : '') + ', so the map is showing slope angles instead.</div>';
@@ -937,7 +925,6 @@ function showLayers() {
     [['岳 / 山 / 峰', 'dake / yama / mine: peak, mountain'], ['尾根', 'one: ridge'], ['沢', 'sawa: gully, creek'], ['谷', 'tani / dani: valley'], ['峠 / 乗越', 'tōge / nokkoshi: pass, col'], ['頭', 'atama / kashira: knoll, top'], ['平 / 原', 'taira / hara: flat, plateau'], ['池 / 湖', 'ike / ko: pond, lake'], ['滝', 'taki: waterfall'], ['川', 'kawa / gawa: river'], ['温泉', 'onsen: hot spring'], ['小屋', 'koya: hut'], ['登山口', 'tozanguchi: trailhead'], ['駐車場', 'chūshajō: parking'], ['スキー場', 'sukījō: ski area'], ['ゲート', 'gēto: backcountry gate'], ['雪崩', 'nadare: avalanche'], ['立入禁止', 'tachiiri kinshi: no entry']]
       .map(([j, e]) => '<dt lang="ja">' + j + '</dt><dd>' + e + '</dd>').join('') + '</dl></details>';
   openSheet('Layers', h, { view: 'layers', tall: true });
-  const gs = $('#goSatSetup'); if (gs) gs.onclick = showSettings;
   $('#aspOnSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; setAspect(b.dataset.v === 'on'); showLayers(); });
   const am = $('#aspMatch'); if (am) am.onchange = () => { state.aspectMatch = am.checked; store.set('aspectMatch', am.checked); redrawShading(); showLayers(); };
   const ac = $('#aspChips'); if (ac) ac.addEventListener('click', e => {
@@ -945,8 +932,6 @@ function showLayers() {
     state.aspectSel = state.aspectSel.includes(a) ? state.aspectSel.filter(x => x !== a) : state.aspectSel.concat(a);
     store.set('aspectSel', state.aspectSel); b.classList.toggle('on'); redrawShading();
   });
-  const sd = $('#sheetBody [data-chips="satdate"]');
-  if (sd) sd.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; sat.date = b.dataset.v; buildSatLayer(); showLayers(); });
   $('#sheetBody').querySelectorAll('[data-seg] button').forEach(btn => btn.onclick = () => {
     const k = btn.parentElement.dataset.seg; state[k] = btn.dataset.v; store.set(k, state[k]);
     if (k === 'base') Promise.resolve(setBase()).then(() => { if (state.view === 'layers') showLayers(); });
@@ -1411,9 +1396,6 @@ function showSettings() {
     '<div class="field"><label for="s-paste">Got a link? Paste it here</label><input type="text" id="s-paste" autocomplete="off" spellcheck="false" placeholder="https://backcountrypowderpigs.github.io/…#s=…"></div><button class="btn" id="sPaste">Open link</button>' +
     '<details class="small"><summary>Share as a file instead</summary><div class="btn-row" style="margin-top:8px"><button class="btn" id="sExport">Share all my pins as a file (' + state.pins.length + ')</button><button class="btn" id="sImport">Import pins file</button></div></details></div>';
   if (window.powderSync) h += powderSync.html();
-  h += '<div class="stack"><p class="eyebrow">Latest satellite (Sentinel-2)</p><p class="small muted" style="margin:0">Free from the EU Copernicus programme. New passes every few days; the app picks the newest clear one. One-off setup, about 5 minutes:</p>' +
-    '<ol class="small" style="margin:0;padding-left:20px;display:grid;gap:4px"><li>Make a free account at <a href="https://dataspace.copernicus.eu/" target="_blank" rel="noopener">dataspace.copernicus.eu</a>.</li><li>Open the Sentinel Hub dashboard from your account, then <b>Configuration Utility</b>.</li><li>Copy the ID of the <b>Simple WMS</b> instance (or create one from the Simple WMS template).</li><li>Paste it here.</li></ol>' +
-    '<div class="field"><label for="s-sat">Copernicus instance ID</label><input type="text" id="s-sat" autocomplete="off" spellcheck="false" value="' + esc(satId()) + '" placeholder="e.g. 1a2b3c4d-…"></div><button class="btn" id="sSat">Save and show satellite</button></div>';
   h += '<div class="field"><span class="lbl">Show recent avalanches (black pins) from</span><div class="seg" id="winSeg">' + [['week', 'This week'], ['month', 'This month'], ['season', 'This season']].map(([v, l]) => '<button type="button" data-v="' + v + '" class="' + (state.recentWindow === v ? 'on' : '') + '">' + l + '</button>').join('') + '</div><span class="help">Season counts from 1 November. Slides older than a week show faded.</span></div>';
   h += '<div class="stack"><p class="eyebrow">Elevation bands for ' + esc(a.name) + '</p><p class="small muted" style="margin:0">' + (a.bandsSource === 'JAN' ? 'Set from JAN\'s guide.' : 'These are estimates. If JAN or a local guide gives different heights, change them; the danger shading uses them.') + '</p><div class="grid3"><div class="field"><label for="s-alp">Alpine from (m)</label><input type="number" id="s-alp" value="' + bands.alpMin + '"></div><div class="field"><label for="s-tl">Treeline from (m)</label><input type="number" id="s-tl" value="' + bands.tlMin + '"></div><div class="field"><span class="lbl">&nbsp;</span><button class="btn" id="sBands">Save</button></div></div>' + (state.bandOverrides[a.id] ? '<button class="btn small ghost" id="sBandsReset">Reset to default</button>' : '') + '</div>';
   h += '<button class="btn" id="sHelp">How to use this app</button>';
@@ -1421,13 +1403,6 @@ function showSettings() {
   h += '<div class="stack"><p class="eyebrow">About · version ' + APP_VERSION + '</p><p class="small muted" style="margin:0">Topo and elevation: Geospatial Information Authority of Japan (GSI). Onsens, parking and other places: © OpenStreetMap contributors. Avalanche bulletins and incident records: Japan Avalanche Network (nadare.jp), summarised. This app helps you plan. It does not replace avalanche training, a beacon, shovel and probe, or your own judgement on the day.</p></div>';
   openSheet('Settings', h, { view: 'settings', tall: true });
   $('#s-name').onchange = e => store.set('reporterName', e.target.value.trim());
-  $('#sSat').onclick = () => {
-    const v = $('#s-sat').value.trim();
-    if (v && !/^[A-Za-z0-9-]{8,64}$/.test(v)) { toast('That doesn\'t look like an instance ID'); return; }
-    store.set('satInstance', v); store.set('satLayerName', ''); sat.layerName = ''; sat.loadedFor = null;
-    if (!v) { toast('Satellite turned off'); return; }
-    state.base = 'sat'; store.set('base', 'sat'); closeSheet(); Promise.resolve(setBase()).then(() => toast(sat.err || 'Satellite on'));
-  };
   $('#sExport').onclick = exportPins;
   if (window.powderSync) powderSync.wire();
   $('#sLink').onclick = () => window.powderShare && powderShare.picker();
@@ -1453,19 +1428,18 @@ function showHelp() {
   h += '<div class="stack"><p class="eyebrow">Before your trip (on Wi-Fi)</p><ol class="help-steps">' +
     '<li>Tap the <b>area name</b> (top left) and pick where you\'re riding.</li>' +
     '<li>Tap the <b>download</b> button and save that area for offline use.</li>' +
-    '<li>Optional: set up <b>Latest satellite</b> in Settings for current snow cover.</li>' +
     '<li>Tap the coloured bars (top right) to read the <b>avalanche brief</b>.</li></ol></div>';
   h += '<div class="stack"><p class="eyebrow">The buttons</p>' +
     row('<b class="ab">Hakuba ⌄</b>', 'Area', 'Pick or add a riding area. Adjust its box.') +
     row('<span class="bars"><i class="r3"></i><i class="r3"></i><i class="r2"></i></span>', 'Avalanche brief', 'Danger rating for alpine, treeline and below treeline, the problems, recent slides and links to the full bulletin.') +
-    row(btnSvg('layersBtn'), 'Layers', 'Satellite or topo, danger or slope shading, and what to show on the map.') +
+    row(btnSvg('layersBtn'), 'Layers', 'Latest satellite, HD photo or topo; danger or slope shading; and what to show on the map.') +
     row(btnSvg('aspectBtn'), 'Aspect', 'Colours slopes by the way they face. Strong colour = what today\'s report flags.') +
     row(btnSvg('routesBtn'), 'Routes', 'Plan a route by tapping the map, see saved routes and tracks, share or import GPX.') +
     row(btnSvg('recBtn'), 'Record', 'Track your trip: time, distance, climb and descent. Keep the app open while recording.') +
     row(btnSvg('packsBtn'), 'Download', 'Save areas for offline use.') +
     row(btnSvg('locateBtn'), 'My position', 'GPS dot plus your height, slope, aspect and the danger rating where you stand. Works without mobile signal.') +
     row(btnSvg('addBtn'), 'Drop a pin', 'Report a slide, mark a slide path, or drop a hazard / handy marker. Or long-press the map.', 'red') +
-    row(btnSvg('settingsBtn'), 'Settings', 'Your name, share pins with mates, recent-avalanche time frame, satellite set-up, snow-zone heights.') + '</div>';
+    row(btnSvg('settingsBtn'), 'Settings', 'Your name, share pins with mates, recent-avalanche time frame, backup, snow-zone heights.') + '</div>';
   h += '<div class="stack"><p class="eyebrow">What the colours mean</p><div class="legend">' +
     '<span><span class="sw" style="background:rgba(214,18,36,.6)"></span><b>Red shading:</b> stay off today</span>' +
     '<span><span class="sw" style="background:rgba(247,148,30,.45)"></span><b>Amber shading:</b> only with good reason</span>' +
@@ -1485,7 +1459,7 @@ $('#helpBtn').addEventListener('click', showHelp);
 
 /* ------------------------------------------------------------------ wiring */
 $('#areaBtn').addEventListener('click', showAreaPicker);
-$('#satFlag').addEventListener('click', () => { if (!satId()) showSettings(); else showLayers(); });
+$('#satFlag').addEventListener('click', () => showLayers());
 $('#briefChip').addEventListener('click', showBrief);
 $('#layersBtn').addEventListener('click', showLayers);
 $('#packsBtn').addEventListener('click', showPacks);
