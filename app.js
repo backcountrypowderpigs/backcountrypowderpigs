@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.25';
+const APP_VERSION = '2026-10-15.26';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -772,6 +772,7 @@ function openSheet(title, html, opts = {}) {
 }
 function closeSheet() { $('#sheet').hidden = true; state.view = null; }
 $('#sheetClose').addEventListener('click', closeSheet);
+$('#sheetClose2').addEventListener('click', closeSheet); // big Close at the bottom, easy to reach on a phone
 
 /* Phone back button / back swipe: closes whatever is open (pop-up, panel, pin drop, box adjust, route plan)
    instead of leaving the app. Works the same on Android (back button) and iPhone (browser back). */
