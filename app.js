@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.20';
+const APP_VERSION = '2026-10-15.21';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -462,10 +462,9 @@ function findPin(id) { return allPins().find(p => p.id === id); }
 const POI_GLYPH = { wild: '♨', onsen: '♨', parking: 'P', hut: '▲', lift: '⇡', shop: '24', medical: '✚', police: '交' };
 const POI_LABEL = { wild: 'Natural mountain onsen', onsen: 'Onsen / hot spring', parking: 'Parking', hut: 'Mountain hut', lift: 'Lift station', shop: 'Convenience store', medical: 'Hospital / clinic', police: 'Police box (koban)' };
 const POI_SHOW = { wild: 'wild', onsen: 'onsen', parking: 'parking', hut: 'hut', lift: 'hut', shop: 'shop', medical: 'shop', police: 'shop' };
-// A hot spring out in nature: mapped as a natural hot spring with no bath house, hotel or building.
+// Only hot springs named as wild baths; the rest of the natural onsens are the listed ones in data/natural-onsens.json.
 function isWildOnsen(t) {
-  if (/野湯|秘湯/.test(t.name || '')) return true;
-  return t.natural === 'hot_spring' && !t.amenity && !t.building && !t.tourism && !t.opening_hours && (t.fee || 'no') !== 'yes';
+  return /野湯|秘湯/.test(t.name || '');
 }
 function poiCategory(t) {
   if (isWildOnsen(t)) return 'wild';
@@ -624,6 +623,7 @@ function withWildOnsens(points, areaId) {
   const seeds = (state.wildSeeds || []).filter(o => o.area === areaId && o.lat != null && bx.contains([o.lat, o.lon]))
     .filter(o => !points.some(p => p.id === o.id))
     .map(o => ({ c: 'wild', id: o.id, lat: o.lat, lon: o.lon, name: o.en || o.ja, ja: o.ja || '', en: o.en || '', ele: o.ele, season: o.season, access: o.access, note: o.note }));
+  points = points.map(p => (p.c === 'wild' && !p.id) ? Object.assign({}, p, { c: 'onsen' }) : p);
   if (!seeds.length) return points;
   const near = p => seeds.some(q => map.distance([p.lat, p.lon], [q.lat, q.lon]) < 300);
   return points.filter(p => !((p.c === 'onsen' || p.c === 'wild') && !p.id && near(p))).concat(seeds);

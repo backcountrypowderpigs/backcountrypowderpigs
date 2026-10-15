@@ -53,12 +53,8 @@ def label_category(t):
 
 
 def is_wild(t):
-    """A hot spring out in nature: mapped as natural=hot_spring with no bath house, hotel or building."""
-    nm = t.get('name', '')
-    if re.search(r'野湯|秘湯', nm):
-        return True
-    return (t.get('natural') == 'hot_spring' and not t.get('amenity') and not t.get('building') and not t.get('tourism')
-            and not t.get('opening_hours') and t.get('fee', 'no') != 'yes')
+    """Only hot springs named as wild baths (野湯 / 秘湯). The rest of the natural onsens come from data/natural-onsens.json."""
+    return bool(re.search(r'野湯|秘湯', t.get('name', '')))
 
 
 def poi_category(t):
