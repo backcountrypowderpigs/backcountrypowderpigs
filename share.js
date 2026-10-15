@@ -90,6 +90,13 @@
     return link;
   }
 
+  // The same icon each item has on the map, for the share lists.
+  function iconFor(kind, x) {
+    if (kind === 'r') return '<span class="swatch ' + (x.type === 'track' ? 'track' : 'plan') + '" style="width:26px;height:6px"></span>';
+    if (x.kind === 'hazard') return '<span class="hz-pin small" style="background:' + hazardOf(x.htype).col + '">' + hazardSvg(hazardOf(x.htype).id, 16) + '</span>';
+    return (x.kind === 'recent' ? PATH : SKULL).replace('width="34" height="34"', 'width="28" height="28"');
+  }
+
   /* ---------- sending ---------- */
   function describe(nr, np) {
     const bits = []; if (nr) bits.push(nr + ' route' + (nr === 1 ? '' : 's')); if (np) bits.push(np + ' marker' + (np === 1 ? '' : 's'));
@@ -123,12 +130,12 @@
     const pins = state.pins.slice().sort((a, b) => (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || ''));
     const here = state.area ? state.area.id : '';
     const pinLabel = p => p.kind === 'hazard' ? hazardOf(p.htype).label : p.kind === 'recent' ? 'Avalanche' + (p.size ? ' size ' + p.size : '') : 'Slide path';
-    const row = (kind, id, title, sub, on) => '<label class="list-item pick"><input type="checkbox" data-' + kind + '="' + esc(id) + '"' + (on ? ' checked' : '') + '><span><span class="t">' + esc(title) + '</span><br><span class="s">' + esc(sub) + '</span></span></label>';
+    const row = (kind, id, title, sub, on, ico) => '<label class="list-item pick"><input type="checkbox" data-' + kind + '="' + esc(id) + '"' + (on ? ' checked' : '') + '><span class="pick-ico">' + (ico || '') + '</span><span><span class="t">' + esc(title) + '</span><br><span class="s">' + esc(sub) + '</span></span></label>';
     let h = '';
-    if (routes.length) h += '<div class="stack"><p class="eyebrow">Routes and tracks</p><div class="list">' + routes.map(r => row('r', r.id, r.name, (r.type === 'plan' ? 'Planned' : 'Recorded') + ' · ' + powderRoutes.fmtKm(r.stats.dist || 0) + ' · ↑ ' + (r.stats.gain || 0) + ' m', false)).join('') + '</div></div>';
+    if (routes.length) h += '<div class="stack"><p class="eyebrow">Routes and tracks</p><div class="list">' + routes.map(r => row('r', r.id, r.name, (r.type === 'plan' ? 'Planned' : 'Recorded') + ' · ' + powderRoutes.fmtKm(r.stats.dist || 0) + ' · ↑ ' + (r.stats.gain || 0) + ' m', false, iconFor('r', r))).join('') + '</div></div>';
     if (pins.length) {
       h += '<div class="stack"><p class="eyebrow">Markers and slide reports</p><div class="btn-row"><button class="btn small" id="pkArea">All in ' + esc(state.area ? state.area.name : 'this area') + '</button><button class="btn small" id="pkNone">None</button></div><div class="list">' +
-        pins.map(p => row('p', p.id, pinLabel(p) + (p.name ? ': ' + p.name : ''), [((state.areas.find(a => a.id === p.area) || {}).name) || '', p.date ? fmtDate(p.date) : '', p.reporter ? 'by ' + p.reporter : ''].filter(Boolean).join(' · '), false)).join('') + '</div></div>';
+        pins.map(p => row('p', p.id, pinLabel(p) + (p.name ? ': ' + p.name : ''), [((state.areas.find(a => a.id === p.area) || {}).name) || '', p.date ? fmtDate(p.date) : '', p.reporter ? 'by ' + p.reporter : ''].filter(Boolean).join(' · '), false, iconFor('p', p))).join('') + '</div></div>';
     }
     if (!h) { toast('Nothing to send yet. Plan a route or drop a marker first.'); return; }
     h += '<button class="btn primary" id="pkSend" disabled>Send</button>';
@@ -160,11 +167,11 @@
     if (!routes.length && !pins.length) { toast('That link is empty'); return; }
     const have = new Set((window.powderRoutes ? powderRoutes.all() : []).map(r => r.id)), havePins = new Set(state.pins.map(p => p.id));
     const pinLabel = p => p.kind === 'hazard' ? hazardOf(p.htype).label : p.kind === 'recent' ? 'Avalanche report' : 'Slide path';
-    const row = (kind, i, title, sub, dup) => '<label class="list-item pick"><input type="checkbox" data-' + kind + '="' + i + '" checked><span><span class="t">' + esc(title) + '</span><br><span class="s">' + esc(sub) + (dup ? ' · already on your map (will update)' : '') + '</span></span></label>';
+    const row = (kind, i, title, sub, dup, ico) => '<label class="list-item pick"><input type="checkbox" data-' + kind + '="' + i + '" checked><span class="pick-ico">' + (ico || '') + '</span><span><span class="t">' + esc(title) + '</span><br><span class="s">' + esc(sub) + (dup ? ' · already on your map (will update)' : '') + '</span></span></label>';
     let h = '<p style="margin:0"><b>' + esc(from) + '</b> sent you ' + esc(describe(routes.length, pins.length)) + '.</p>';
     if (inIosBrowser) h += '<div class="card"><b>Use the home-screen app?</b><span class="small">iPhone opened this link in Safari, which keeps its own separate map. To add it to your Powder Pigs app instead: tap <b>Copy link</b>, open Powder Pigs from your home screen, then Settings → <b>Got a link? Paste it here</b>.</span><button class="btn small" id="rcCopy">Copy link</button></div>';
-    if (routes.length) h += '<div class="list">' + routes.map((r, i) => row('r', i, r.name || (r.type === 'plan' ? 'Planned route' : 'Recorded track'), (r.type === 'plan' ? 'Planned route' : 'Recorded track') + ' · ' + powderRoutes.fmtKm(r.sentStats ? r.sentStats[0] : r.pts.reduce((m, p, k) => k ? m + map.distance(r.pts[k - 1], p) : 0, 0)), have.has(r.id))).join('') + '</div>';
-    if (pins.length) h += '<div class="list">' + pins.map((p, i) => row('p', i, pinLabel(p) + (p.name ? ': ' + p.name : ''), [p.date ? fmtDate(p.date) : '', p.reporter ? 'by ' + p.reporter : ''].filter(Boolean).join(' · ') || 'Marker', havePins.has(p.id))).join('') + '</div>';
+    if (routes.length) h += '<div class="list">' + routes.map((r, i) => row('r', i, r.name || (r.type === 'plan' ? 'Planned route' : 'Recorded track'), (r.type === 'plan' ? 'Planned route' : 'Recorded track') + ' · ' + powderRoutes.fmtKm(r.sentStats ? r.sentStats[0] : r.pts.reduce((m, p, k) => k ? m + map.distance(r.pts[k - 1], p) : 0, 0)), have.has(r.id), iconFor('r', r))).join('') + '</div>';
+    if (pins.length) h += '<div class="list">' + pins.map((p, i) => row('p', i, pinLabel(p) + (p.name ? ': ' + p.name : ''), [p.date ? fmtDate(p.date) : '', p.reporter ? 'by ' + p.reporter : ''].filter(Boolean).join(' · ') || 'Marker', havePins.has(p.id), iconFor('p', p))).join('') + '</div>';
     h += '<div class="btn-row"><button class="btn primary" id="rcAdd">Add to my map</button><button class="btn" id="rcNo">Not now</button></div>';
     openSheet('Shared with you', h, { view: 'receive' });
     const link = BASE + '#s=' + code;

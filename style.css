@@ -403,3 +403,6 @@ details summary { cursor: pointer; color: var(--muted); }
   font-weight: 700; font-size: 15px; box-shadow: var(--shadow); cursor: pointer; white-space: nowrap;
 }
 .update-btn:disabled { opacity: .8; }
+.pick-ico { flex: 0 0 34px; width: 34px; display: grid; place-items: center; }
+.pick-ico .hz-pin.small { width: 24px; height: 24px; }
+.list-item.pick { grid-template-columns: auto 34px 1fr; }
