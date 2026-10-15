@@ -228,6 +228,111 @@
     return { pts: simplify(path, 6) };
   }
 
+  /* ---------- what you were doing on a recorded track ----------
+     Climb modes chosen at the start: snowshoes, splitboard (skinning), verts, bootpack.
+     From the GPS points the app works out:
+       - Break: stopped for a minute or more (the app keeps no points while you stand still, so a long gap = a stop).
+       - Riding: moving fast downhill (over ~8 km/h and dropping).
+       - Bootpack / verts: a climb steeper than your setting (20° by default) that starts after a stop.
+       - Transition: a break where what you're doing changes (skins off, ride, skins on...).
+     You can force it while recording (Climb / Boot / Ride buttons) and fix any section afterwards. */
+  const UP_MODES = { snowshoe: 'Snowshoes', split: 'Splitboard', verts: 'Verts', boot: 'Bootpack' };
+  const ACT = {
+    snowshoe: { label: 'Snowshoeing', col: '#00b4ff', dash: '9 6', cap: 'butt' },
+    split: { label: 'Skinning', col: '#00b4ff', dash: '16 5 3 5', cap: 'butt' },
+    verts: { label: 'Verts', col: '#a855f7', dash: '5 5', cap: 'butt' },
+    boot: { label: 'Bootpack', col: '#a855f7', dash: '1 8', cap: 'round' },
+    ride: { label: 'Riding', col: '#ff7a1a', dash: null, cap: 'round' },
+    flat: { label: 'Moving', col: '#00b4ff', dash: null, cap: 'round' },
+  };
+  // Which drawing style a section gets: climb sections use the chosen climb mode; steep ones become boot/verts.
+  function actKey(type, upMode) {
+    if (type === 'ride') return 'ride';
+    if (type === 'boot') return upMode === 'verts' ? 'verts' : 'boot';
+    if (upMode === 'verts' || upMode === 'boot') return upMode;
+    return upMode === 'snowshoe' ? 'snowshoe' : upMode === 'split' ? 'split' : 'flat';
+  }
+  function classify(pts, opts = {}) {
+    const upMode = opts.upMode || 'split', steep = opts.steep || 20, marks = opts.marks || [], edits = opts.edits || {};
+    const n = pts.length; if (n < 2) return { segs: [], stops: [] };
+    const tOf = i => pts[i][3] || 0;
+    // 1. stops: a step taking 60 s+ at walking-stop speed (no points logged while standing still)
+    const stopAfter = new Array(n).fill(0); // stop duration (s) before point i
+    for (let i = 1; i < n; i++) {
+      const dt = (tOf(i) - tOf(i - 1)) / 1000, d = hav(pts[i - 1], pts[i]);
+      if (dt >= 60 && d / dt < 0.3) stopAfter[i] = dt;
+    }
+    // 2. moving class per point from a ~40 s window: riding = fast and dropping
+    const cls = new Array(n).fill('up');
+    let a = 0, b = 0;
+    for (let i = 0; i < n; i++) {
+      while (a < i && tOf(i) - tOf(a) > 20000) a++;
+      if (b < i) b = i;
+      while (b + 1 < n && tOf(b + 1) - tOf(i) <= 20000 && !stopAfter[b + 1]) b++;
+      let d = 0; for (let k = Math.max(a, 1); k <= b; k++) if (!stopAfter[k]) d += hav(pts[k - 1], pts[k]);
+      const dt = Math.max(1, (tOf(b) - tOf(a)) / 1000), e0 = pts[a][2], e1 = pts[b][2];
+      const vr = (e0 != null && e1 != null) ? (e1 - e0) / dt : 0, sp = d / dt;
+      if ((sp > 2.2 && vr < -0.15) || vr < -0.6) cls[i] = 'ride';
+    }
+    // 3. manual marks while recording override from their time until the next mark
+    const ms = marks.slice().sort((x, y) => x.t - y.t);
+    if (ms.length) for (let i = 0; i < n; i++) { let m = null; for (const k of ms) { if (k.t <= tOf(i)) m = k; else break; } if (m && m.type !== 'auto') cls[i] = m.type; }
+    // 4. runs, split at stops; merge blips under 45 s into the run before
+    let runs = [];
+    for (let i = 1; i < n; i++) {
+      const c = cls[i], last = runs[runs.length - 1];
+      if (!last || stopAfter[i] || last.c !== c) runs.push({ c, i0: i - 1, i1: i, stopBefore: stopAfter[i] });
+      else last.i1 = i;
+    }
+    const dur = r => (tOf(r.i1) - tOf(r.i0)) / 1000;
+    const merged = [];
+    runs.forEach(r => {
+      const prev = merged[merged.length - 1];
+      if (prev && !r.stopBefore && (dur(r) < 45 || dur(prev) < 45) && !ms.some(m => m.t > tOf(r.i0) && m.t <= tOf(r.i1))) { if (dur(prev) < 45 && dur(r) >= 45) prev.c = r.c; prev.i1 = r.i1; }
+      else merged.push(Object.assign({}, r));
+    });
+    // 5. stats per run, steep climbs after a stop (or at the start) become boot/verts
+    const segs = merged.map((r, k) => {
+      let dist = 0; for (let i = r.i0 + 1; i <= r.i1; i++) dist += hav(pts[i - 1], pts[i]);
+      const c = climb(pts.slice(r.i0, r.i1 + 1).map(p => p[2]));
+      let type = r.c;
+      if (type === 'up') {
+        const grade = dist > 0 ? Math.atan(c.gain / dist) * 180 / Math.PI : 0;
+        if ((upMode === 'boot' || upMode === 'verts') || ((k === 0 || r.stopBefore) && grade >= steep && c.gain >= 25)) type = 'boot';
+      }
+      if (edits[r.i0]) type = edits[r.i0];
+      let moving = 0; for (let i = r.i0 + 1; i <= r.i1; i++) if (!stopAfter[i]) moving += (tOf(i) - tOf(i - 1)) / 1000;
+      return { type, i0: r.i0, i1: r.i1, dist: Math.round(dist), gain: c.gain, loss: c.loss, time: Math.round(moving), stopBefore: Math.round(r.stopBefore || 0) };
+    });
+    // 6. stops: a transition when what you're doing changes across it
+    const stops = [];
+    segs.forEach((g, k) => { if (k && g.stopBefore) stops.push({ i: g.i0, dur: g.stopBefore, transition: segs[k - 1].type !== g.type }); });
+    return { segs, stops };
+  }
+  function activitySummary(r) {
+    const A = classify(r.pts, r.act || {}), up = (r.act && r.act.upMode) || 'split';
+    const by = {};
+    A.segs.forEach(g => { const k = actKey(g.type, up); by[k] = by[k] || { time: 0, gain: 0, loss: 0, dist: 0, n: 0 }; const o = by[k]; o.time += g.time; o.gain += g.gain; o.loss += g.loss; o.dist += g.dist; o.n++; });
+    return { A, by, up };
+  }
+  function drawTrackActs(layer, r, weight, opacity, onClick) {
+    const { A, up } = activitySummary(r);
+    A.segs.forEach(g => {
+      const st = ACT[actKey(g.type, up)], ll = r.pts.slice(g.i0, g.i1 + 1).map(p => [p[0], p[1]]); if (ll.length < 2) return;
+      layer.addLayer(L.polyline(ll, { color: '#0b1520', weight: weight + 6, opacity: 0.45 * opacity, interactive: false }));
+      layer.addLayer(L.polyline(ll, { color: '#ffffff', weight: weight + 3, opacity: 0.95 * opacity, interactive: false }));
+      const pl = L.polyline(ll, { color: st.col, weight, opacity, dashArray: st.dash, lineCap: st.cap, lineJoin: 'round' });
+      if (onClick) pl.on('click', onClick);
+      layer.addLayer(pl);
+    });
+    A.stops.forEach(sp => {
+      const p = r.pts[sp.i]; if (!p) return;
+      const html = sp.transition ? '<div class="act-stop tr" title="Transition">⇄</div>' : '<div class="act-stop" title="Break"></div>';
+      layer.addLayer(L.marker([p[0], p[1]], { interactive: false, icon: L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html }) }));
+    });
+    return A;
+  }
+
   /* ---------- drawing ---------- */
   function cased(latlngs, col, dashed, weight = 4, opacity = 1) {
     return [
@@ -244,9 +349,12 @@
     routes.filter(r => visible.has(r.id)).forEach(r => {
       const ll = r.pts.map(p => [p[0], p[1]]); if (ll.length < 2) return;
       if (r.type === 'plan') { glow(r.stats && r.stats.segs, routeLayer); drawFlags(r.stats && r.stats.flags, routeLayer); }
-      const parts = cased(ll, r.type === 'plan' ? PLAN_COL : TRACK_COL, r.type === 'plan', 4, 0.9);
-      parts[2].on('click', () => openRoute(r.id));
-      parts.forEach(p => routeLayer.addLayer(p));
+      if (r.type === 'track' && r.pts.length > 2 && r.pts[0][3]) drawTrackActs(routeLayer, r, 4, 0.95, () => openRoute(r.id));
+      else {
+        const parts = cased(ll, r.type === 'plan' ? PLAN_COL : TRACK_COL, r.type === 'plan', 4, 0.9);
+        parts[2].on('click', () => openRoute(r.id));
+        parts.forEach(p => routeLayer.addLayer(p));
+      }
       routeLayer.addLayer(L.circleMarker(ll[0], { radius: 5, color: '#fff', weight: 2, fillColor: '#16a34a', fillOpacity: 1, interactive: false }));
       routeLayer.addLayer(L.circleMarker(ll[ll.length - 1], { radius: 5, color: '#fff', weight: 2, fillColor: '#0b1520', fillOpacity: 1, interactive: false }));
     });
@@ -287,9 +395,30 @@
         warn.map(w => '<div class="grade-warn">' + w + '</div>').join('') + '</div>' + gradeLegend();
     } else if (r.type === 'plan' && s.maxSlope != null) h += '<p class="small" style="margin:0">Steepest point <b>' + s.maxSlope + '°</b>. <b>' + s.steepPct + '%</b> of the line is on 30° or steeper.</p>';
     if (r.type === 'plan') h += '<p class="small muted" style="margin:0">Time is a touring estimate (Munter: 4 units/h up, 10 down). Your pace will differ.</p>';
+    if (r.type === 'track' && r.pts.length > 2 && r.pts[0][3]) h += activityHtml(r);
     return h;
   }
 
+  function actSwatch(k) {
+    const st = ACT[k];
+    return '<svg width="34" height="10" aria-hidden="true"><path d="M2 5 H32" stroke="#fff" stroke-width="7"/><path d="M2 5 H32" stroke="' + st.col + '" stroke-width="4"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + ' stroke-linecap="' + st.cap + '"/></svg>';
+  }
+  function activityHtml(r) {
+    const { A, by, up } = activitySummary(r);
+    const order = ['snowshoe', 'split', 'flat', 'verts', 'boot', 'ride'].filter(k => by[k]);
+    const nBreak = A.stops.filter(x => !x.transition).length, nTr = A.stops.filter(x => x.transition).length, stopT = A.stops.reduce((t, x) => t + x.dur, 0);
+    const laps = A.segs.filter(g => g.type === 'ride' && g.loss >= 50).length;
+    let h = '<div class="stack"><p class="eyebrow">What you were doing</p><div class="act-table">' +
+      order.map(k => '<div class="act-row"><span>' + actSwatch(k) + '</span><b>' + ACT[k].label + '</b><span>' + fmtDur(by[k].time) + '</span><span>' + (k === 'ride' ? '↓ ' + by[k].loss : '↑ ' + by[k].gain) + ' m</span></div>').join('') +
+      '<div class="act-row"><span><span class="act-stop inline"></span></span><b>Breaks</b><span>' + fmtDur(stopT) + '</span><span>' + nBreak + ' stop' + (nBreak === 1 ? '' : 's') + (nTr ? ' · ' + nTr + ' transition' + (nTr === 1 ? '' : 's') : '') + '</span></div>' +
+      '</div>' + (laps ? '<p class="small" style="margin:0"><b>' + laps + '</b> run' + (laps === 1 ? '' : 's') + ' ridden.</p>' : '') +
+      '<details class="small"><summary>Sections (' + A.segs.length + ') · fix one if it got it wrong</summary><div class="act-secs">' +
+      A.segs.map((g, k) => '<div class="act-sec"><span>' + actSwatch(actKey(g.type, up)) + '</span><span>' + (k + 1) + '. ' + fmtDur(g.time) + ' · ' + (g.type === 'ride' ? '↓ ' + g.loss : '↑ ' + g.gain) + ' m</span>' +
+        '<select data-sec="' + g.i0 + '" aria-label="What you were doing in section ' + (k + 1) + '">' + [['up', UP_MODES[up] === 'Splitboard' ? 'Skinning' : UP_MODES[up] || 'Climbing'], ['boot', up === 'verts' ? 'Verts' : 'Bootpack'], ['ride', 'Riding']].map(([v, l]) => '<option value="' + v + '"' + (g.type === v ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></div>').join('') +
+      '</div></details>' +
+      '<div class="field"><span class="lbl">Climbing on</span><div class="seg" id="actUp">' + Object.entries(UP_MODES).map(([v, l]) => '<button type="button" data-v="' + v + '" class="' + (up === v ? 'on' : '') + '">' + l + '</button>').join('') + '</div></div></div>';
+    return h;
+  }
   function gradeLegend() {
     return '<div class="legend small"><span><span class="sw" style="background:' + GLOW.steep + ';border:0"></span>Steep: skin 20–25° / ride 35–40°</span>' +
       '<span><span class="sw" style="background:' + GLOW.vsteep + ';border:0"></span>Very steep: skin 25–30° (kick turns) / ride 40–45°</span>' +
@@ -381,10 +510,26 @@
   let recWatch = null, wakeLock = null, recTick = null;
   async function keepAwake() { try { if ('wakeLock' in navigator && !document.hidden) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { wakeLock = null; } }
   document.addEventListener('visibilitychange', () => { if (rec && !rec.paused && !document.hidden) keepAwake(); });
-  function startRec() {
+  // Before a new recording: how are you going up?
+  function askRecMode() {
+    if (rec) { startRec(); return; }
+    const last = store.get('recUpMode', 'split'), steep = store.get('recSteep', 20);
+    openSheet('Record a track', '<div class="field"><span class="lbl">How are you going up?</span><div class="chips" id="rmUp">' +
+      Object.entries(UP_MODES).map(([v, l]) => '<button type="button" data-v="' + v + '" class="' + (v === last ? 'on' : '') + '">' + l + '</button>').join('') + '</div></div>' +
+      '<div class="field"><span class="lbl">Call a climb bootpack / verts when it\'s steeper than</span><div class="seg" id="rmSteep">' + [20, 25, 30].map(v => '<button type="button" data-v="' + v + '" class="' + (v === steep ? 'on' : '') + '">' + v + '°</button>').join('') + '</div>' +
+      '<span class="help">After a stop. Splitboarders often skin 20–25°, so 25° is a good choice if you skin steep.</span></div>' +
+      '<p class="small muted" style="margin:0">The app works out breaks, transitions, bootpacking and riding as you go, and colours the track to match. You can switch it yourself while recording, and fix any section afterwards.</p>' +
+      '<button class="btn primary" id="rmGo">● Start recording</button>', { view: 'recstart' });
+    let up = last, st = steep;
+    $('#rmUp').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; up = b.dataset.v; $('#rmUp').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
+    $('#rmSteep').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; st = +b.dataset.v; $('#rmSteep').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
+    $('#rmGo').onclick = () => { store.set('recUpMode', up); store.set('recSteep', st); startRec({ upMode: up, steep: st }); };
+  }
+  function startRec(act) {
     if (!navigator.geolocation) { toast('This device can\'t share its position with the app'); return; }
     stopAllModes(); closeSheet();
-    rec = rec || { id: 't-' + uid(), start: Date.now(), pts: [], paused: false };
+    rec = rec || { id: 't-' + uid(), start: Date.now(), pts: [], paused: false, act: Object.assign({ upMode: 'split', steep: 20, marks: [] }, act || {}) };
+    rec.act = rec.act || { upMode: store.get('recUpMode', 'split'), steep: store.get('recSteep', 20), marks: [] };
     rec.paused = false; store.set('recording', rec);
     document.body.classList.add('recording');
     recWatch = navigator.geolocation.watchPosition(onRecFix, err => { if (err.code === 1) { toast('Location is blocked. Allow it for this site in your settings.'); pauseRec(); } }, { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 });
@@ -410,15 +555,23 @@
   function renderRec() {
     liveLayer.clearLayers();
     if (!rec) return;
+    if (!rec.act) rec.act = { upMode: store.get('recUpMode', 'split'), steep: store.get('recSteep', 20), marks: [] };
     const ll = rec.pts.map(p => [p[0], p[1]]);
-    if (ll.length > 1) cased(ll, TRACK_COL, false, 5).forEach(p => liveLayer.addLayer(p));
-    if (ll.length) liveLayer.addLayer(L.circleMarker(ll[ll.length - 1], { radius: 7, color: '#fff', weight: 3, fillColor: TRACK_COL, fillOpacity: 1, interactive: false }));
+    let A = null;
+    if (ll.length > 1) A = drawTrackActs(liveLayer, rec, 5, 1);
+    const lm = (rec.act.marks || []).slice(-1)[0];
+    const curKey = lm && lm.type !== 'auto' ? actKey(lm.type, rec.act.upMode) : A && A.segs.length ? actKey(A.segs[A.segs.length - 1].type, rec.act.upMode) : actKey('up', rec.act.upMode);
+    rec._now = curKey;
+    if (ll.length) liveLayer.addLayer(L.circleMarker(ll[ll.length - 1], { radius: 7, color: '#fff', weight: 3, fillColor: ACT[curKey].col, fillOpacity: 1, interactive: false }));
     renderRecBar();
   }
   function renderRecBar() {
     if (!rec) return;
     const s = trackStats(rec.pts), elapsed = (Date.now() - rec.start) / 1000;
-    bar.innerHTML = '<div class="route-bar-head"><b class="rec-dot' + (rec.paused ? ' paused' : '') + '">' + (rec.paused ? 'Paused' : 'Recording') + '</b><span class="rec-clock">' + fmtClock(elapsed) + '</span></div>' +
+    const lastMark = (rec.act.marks || []).slice(-1)[0], forced = lastMark && lastMark.type !== 'auto' ? lastMark.type : 'auto';
+    const nowKey = rec._now || actKey('up', rec.act.upMode);
+    bar.innerHTML = '<div class="route-bar-head"><b class="rec-dot' + (rec.paused ? ' paused' : '') + '">' + (rec.paused ? 'Paused' : 'Recording') + '</b><span class="act-now">' + actSwatch(nowKey) + ' ' + ACT[nowKey].label + '</span><span class="rec-clock">' + fmtClock(elapsed) + '</span></div>' +
+      '<div class="seg act-seg" id="actForce">' + [['auto', 'Auto'], ['up', UP_MODES[rec.act.upMode] === 'Splitboard' ? 'Skin' : (UP_MODES[rec.act.upMode] || 'Climb')], ['boot', rec.act.upMode === 'verts' ? 'Verts' : 'Boot'], ['ride', 'Ride']].map(([v, l]) => '<button type="button" data-v="' + v + '" class="' + (forced === v ? 'on' : '') + '">' + l + '</button>').join('') + '</div>' +
       '<div class="stats">' +
       '<div class="stat"><span class="k">Distance</span><span class="v">' + fmtKm(s.dist) + '</span></div>' +
       '<div class="stat"><span class="k">Climb</span><span class="v">↑ ' + s.gain + ' m</span></div>' +
@@ -428,8 +581,9 @@
       '<p class="small muted" style="margin:0">Keep the app open: phones pause GPS for web apps when the screen locks. The screen stays on while recording.</p>' +
       '<div class="btn-row">' + (rec.paused ? '<button class="btn small primary" id="rResume">Resume</button>' : '<button class="btn small" id="rPause">Pause</button>') + '<button class="btn small danger" id="rStop">Stop</button></div>';
     bar.hidden = false;
+    $('#actForce').onclick = e => { const b = e.target.closest('button'); if (!b) return; rec.act.marks = (rec.act.marks || []).concat({ t: Date.now(), type: b.dataset.v }); store.set('recording', rec); toast(b.dataset.v === 'auto' ? 'Working it out automatically' : 'Now: ' + b.textContent, 1500); renderRec(); };
     const pz = $('#rPause'); if (pz) pz.onclick = pauseRec;
-    const rs = $('#rResume'); if (rs) rs.onclick = startRec;
+    const rs = $('#rResume'); if (rs) rs.onclick = () => startRec();
     $('#rStop').onclick = stopRec;
   }
   function stopRec() {
@@ -437,7 +591,7 @@
     const r = rec; rec = null; store.set('recording', null);
     document.body.classList.remove('recording'); $('#recBtn').classList.remove('rec-on'); bar.hidden = true; liveLayer.clearLayers();
     if (!r || r.pts.length < 2) { toast('Nothing recorded. Track discarded.'); return; }
-    const t = { id: r.id, type: 'track', name: 'Track ' + new Date(r.start).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + (state.area ? ' · ' + state.area.name : ''), created: new Date(r.start).toISOString(), area: state.area && state.area.id, pts: r.pts, stats: trackStats(r.pts), pending: true };
+    const t = { id: r.id, type: 'track', name: 'Track ' + new Date(r.start).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + (state.area ? ' · ' + state.area.name : ''), created: new Date(r.start).toISOString(), area: state.area && state.area.id, pts: r.pts, stats: trackStats(r.pts), act: r.act, pending: true };
     routes.unshift(t); visible.add(t.id); save(); drawSaved(); openRoute(t.id, true);
   }
   function stopAllModes() { if (plan) endPlan(); }
@@ -460,7 +614,7 @@
     h += '<button class="btn" id="gpxImport">Import GPX (from a mate, CalTopo, Gaia…)</button><input type="file" id="gpxFile" accept=".gpx,application/gpx+xml,application/xml,text/xml" hidden>';
     openSheet('Routes and tracks', h, { view: 'routes', tall: true });
     $('#goPlan').onclick = () => startPlan();
-    $('#goRec').onclick = () => { if (rec) { closeSheet(); renderRec(); } else startRec(); };
+    $('#goRec').onclick = () => { if (rec) { closeSheet(); renderRec(); } else askRecMode(); };
     $('#sheetBody').querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', e => { if (e.target.closest('.vis')) return; openRoute(el.dataset.open); }));
     $('#sheetBody').querySelectorAll('[data-vis]').forEach(cb => cb.onchange = () => { cb.checked ? visible.add(cb.dataset.vis) : visible.delete(cb.dataset.vis); save(); drawSaved(); });
     $('#gpxImport').onclick = () => $('#gpxFile').click();
@@ -501,6 +655,10 @@
     const keep = $('#rKeep'); if (keep) keep.onclick = () => { r.name = nameEl.value.trim() || r.name; delete r.pending; save(); toast('Track kept'); openRoutes(); };
     const disc = $('#rDiscard'); if (disc) disc.onclick = () => { removeRoute(r.id); toast('Track discarded'); closeSheet(); };
     const sh = $('#rShare'); if (sh) sh.onclick = () => shareGpx(r);
+    $('#sheetBody').querySelectorAll('select[data-sec]').forEach(sel => sel.onchange = () => {
+      r.act = r.act || {}; r.act.edits = Object.assign({}, r.act.edits, { [sel.dataset.sec]: sel.value }); save(); drawSaved(); openRoute(r.id);
+    });
+    const au = $('#actUp'); if (au) au.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; r.act = Object.assign({}, r.act, { upMode: b.dataset.v }); save(); drawSaved(); openRoute(r.id); });
     const lk = $('#rLink'); if (lk) lk.onclick = () => window.powderShare && powderShare.send({ routes: [r] }, r.name);
     const ed = $('#rEdit'); if (ed) ed.onclick = () => startPlan(r);
     const del = $('#rDel'); if (del) del.onclick = () => {
@@ -525,7 +683,7 @@
     if (old && !old.synced) return false; // never overwrite one of mine
     const type = x.type === 'track' ? 'track' : 'plan';
     const r = { id: x.id, type, name: String(x.name || 'Shared route').slice(0, 60), created: x.created || new Date().toISOString(), from: String(x.from || '').slice(0, 40), synced: scope,
-      pts: type === 'plan' ? x.pts.map(p => [p[0], p[1]]) : x.pts };
+      pts: type === 'plan' ? x.pts.map(p => [p[0], p[1]]) : x.pts, act: x.act };
     if (old && old.name === r.name && old.pts.length === r.pts.length) return false;
     r.stats = type === 'plan' ? lean(await analyseLine(r.pts)) : trackStats(r.pts);
     if (type === 'track' && Array.isArray(x.sentStats)) ['dist', 'gain', 'loss', 'time', 'moving'].forEach((k, i) => { const v = Number(x.sentStats[i]); if (isFinite(v) && v >= 0) r.stats[k] = v; });
@@ -578,7 +736,7 @@
   }
   fab('routesBtn', 'Routes and tracks', '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="5" cy="18" r="2.2" fill="currentColor"/><circle cx="19" cy="6" r="2.2" fill="currentColor"/><path d="M6.5 16.5c3-1 2-5 5.5-6s4.5-1.5 5.5-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 2.5" stroke-linecap="round"/></svg>').onclick = openRoutes;
   fab('recBtn', 'Record a track', '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="4.5" fill="#e11d48"/></svg>').onclick = () => {
-    if (rec && !rec.paused) { renderRec(); toast('Recording. Use Pause or Stop below.', 1800); } else startRec();
+    if (rec && !rec.paused) { renderRec(); toast('Recording. Use Pause or Stop below.', 1800); } else if (rec) startRec(); else askRecMode();
   };
 
   // Pick up a recording that was running when the app was closed.
@@ -591,7 +749,7 @@
     const type = x.type === 'track' ? 'track' : 'plan';
     const pts = x.pts.slice(0, 20000).filter(p => isFinite(p[0]) && isFinite(p[1]));
     const r = { id: String(x.id || 'r-' + uid()).slice(0, 40), type, name: String(x.name || (type === 'plan' ? 'Shared route' : 'Shared track')).slice(0, 60),
-      created: x.created || new Date().toISOString(), from: String(x.from || '').slice(0, 40), pts: type === 'plan' ? pts.map(p => [p[0], p[1]]) : pts };
+      created: x.created || new Date().toISOString(), from: String(x.from || '').slice(0, 40), pts: type === 'plan' ? pts.map(p => [p[0], p[1]]) : pts, act: x.act };
     r.stats = type === 'plan' ? lean(await analyseLine(r.pts)) : trackStats(r.pts);
     if (type === 'track' && Array.isArray(x.sentStats)) ['dist', 'gain', 'loss', 'time', 'moving'].forEach((k, i) => { const v = Number(x.sentStats[i]); if (isFinite(v) && v >= 0) r.stats[k] = v; });
     routes.unshift(r); visible.add(r.id); save(); drawSaved();

@@ -72,11 +72,12 @@
     const track = x.type === 'track';
     const o = { i: x.id, n: x.name, t: track ? 't' : 'p', c: x.created, p: encPts(track ? thin(x.pts, tol) : x.pts, track) };
     if (track && x.stats) o.s = ['dist', 'gain', 'loss', 'time', 'moving'].map(k => Math.round(x.stats[k] || 0));
+    if (track && x.act) o.a = { u: x.act.upMode, s: x.act.steep, m: x.act.marks || [], e: x.act.edits || {} };
     return o;
   }
   function decRoute(x, from) {
     const track = x.t === 't';
-    return { id: String(x.i || ''), name: String(x.n || ''), type: track ? 'track' : 'plan', created: x.c, from, pts: Array.isArray(x.p) ? decPts(x.p, track) : [], sentStats: track && Array.isArray(x.s) ? x.s : null };
+    return { id: String(x.i || ''), name: String(x.n || ''), type: track ? 'track' : 'plan', created: x.c, from, pts: Array.isArray(x.p) ? decPts(x.p, track) : [], sentStats: track && Array.isArray(x.s) ? x.s : null, act: track && x.a ? { upMode: x.a.u, steep: x.a.s, marks: x.a.m || [], edits: x.a.e || {} } : undefined };
   }
   async function buildLink(routes, pins) {
     const from = reporterName();

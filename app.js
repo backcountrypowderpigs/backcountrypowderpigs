@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.35';
+const APP_VERSION = '2026-10-16.1';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -1578,7 +1578,13 @@ function keyHtml() {
     row(sv(40, '<rect x="2" y="3" width="36" height="14" rx="2" fill="rgba(214,18,36,.6)"/>'), 'Red shading: stay off today') +
     row(sv(40, '<rect x="2" y="3" width="36" height="14" rx="2" fill="rgba(247,148,30,.45)"/>'), 'Amber shading: only with good reason') +
     row(sv(40, '<path d="M2 10 H38" stroke="#fff" stroke-width="6"/><path d="M2 10 H38" stroke="#ff2bd6" stroke-width="3" stroke-dasharray="6 4"/>'), 'Planned route') +
-    row(sv(40, '<path d="M2 10 H38" stroke="#fff" stroke-width="6"/><path d="M2 10 H38" stroke="#00b4ff" stroke-width="3"/>'), 'Recorded track') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#fff" stroke-width="7"/><path d="M2 10 H38" stroke="#00b4ff" stroke-width="4" stroke-dasharray="9 6" stroke-linecap="butt"/>'), 'Track: snowshoeing') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#fff" stroke-width="7"/><path d="M2 10 H38" stroke="#00b4ff" stroke-width="4" stroke-dasharray="16 5 3 5" stroke-linecap="butt"/>'), 'Track: skinning (splitboard)') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#fff" stroke-width="7"/><path d="M2 10 H38" stroke="#a855f7" stroke-width="4" stroke-dasharray="1 8" stroke-linecap="round"/>'), 'Track: bootpack') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#fff" stroke-width="7"/><path d="M2 10 H38" stroke="#a855f7" stroke-width="4" stroke-dasharray="5 5" stroke-linecap="butt"/>'), 'Track: verts') +
+    row(sv(40, '<path d="M2 10 H38" stroke="#fff" stroke-width="7"/><path d="M2 10 H38" stroke="#ff7a1a" stroke-width="4" stroke-linecap="round"/>'), 'Track: riding') +
+    row('<span class="act-stop"></span>', 'Break on a track') +
+    row('<span class="act-stop tr">⇄</span>', 'Transition (skins off, ride, back up…)') +
     row(sv(40, '<path d="M2 10 H38" stroke="#16a34a" stroke-width="3" stroke-dasharray="3 3"/>'), 'Suggested gentler line') +
     row(sv(40, '<path d="M2 10 H38" stroke="#ef4444" stroke-width="8" stroke-opacity=".45"/>'), 'Steep section glow (amber, red, purple = steeper)');
   t += '<p class="small muted" style="margin:6px 0 0">Slope and aspect colours are explained in Layers and on the compass button.</p></div>';

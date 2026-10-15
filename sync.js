@@ -61,7 +61,7 @@
     });
     if (S.on) (window.powderRoutes ? powderRoutes.all() : []).filter(r => !r.synced && !r.from && !r.pending).forEach(r => {
       const w = powderRoutes.shareOf(r); if (w === 'me' || (w === 'crew' && !crewPath())) return;
-      const key = w + '|' + r.name + '|' + r.pts.length + '|' + Math.round((r.stats && r.stats.dist) || 0);
+      const key = w + '|' + r.name + '|' + r.pts.length + '|' + Math.round((r.stats && r.stats.dist) || 0) + '|' + JSON.stringify(r.act || {}).length;
       const json = JSON.stringify(Object.assign({ from: reporterName() || '' }, powderShare.encRoute(r, 2)));
       if (json.length > 800000) return; // far too long for one record; send it by link instead
       if (w === 'all') doc('routes/' + r.id, json, key); else doc(crewPath() + '/' + r.id, json, key, 'route');
@@ -75,7 +75,7 @@
         let json = JSON.stringify(o);
         if (json.length > 800000) { o.pts = powderShare.decRoute(powderShare.encRoute(r, 2), '').pts; json = JSON.stringify(o); }
         if (json.length > 800000) return;
-        doc(bp + r.id, json, (r.share || '') + '|' + r.name + '|' + r.pts.length + '|' + (r.created || ''), 'route');
+        doc(bp + r.id, json, (r.share || '') + '|' + r.name + '|' + r.pts.length + '|' + (r.created || '') + '|' + JSON.stringify(r.act || {}).length, 'route');
       });
       const meta = backupMeta(); doc(bp + '_settings', JSON.stringify(meta), JSON.stringify(meta).length + '|' + JSON.stringify(meta).split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0), 'meta');
     }
