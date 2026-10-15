@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.27';
+const APP_VERSION = '2026-10-15.28';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -1415,6 +1415,7 @@ function showSettings() {
   h += '<div class="field"><span class="lbl">Show recent avalanches (black pins) from</span><div class="seg" id="winSeg">' + [['week', 'This week'], ['month', 'This month'], ['season', 'This season']].map(([v, l]) => '<button type="button" data-v="' + v + '" class="' + (state.recentWindow === v ? 'on' : '') + '">' + l + '</button>').join('') + '</div><span class="help">Season counts from 1 November. Slides older than a week show faded.</span></div>';
   h += '<div class="stack"><p class="eyebrow">Elevation bands for ' + esc(a.name) + '</p><p class="small muted" style="margin:0">' + (a.bandsSource === 'JAN' ? 'Set from JAN\'s guide.' : 'These are estimates. If JAN or a local guide gives different heights, change them; the danger shading uses them.') + '</p><div class="grid3"><div class="field"><label for="s-alp">Alpine from (m)</label><input type="number" id="s-alp" value="' + bands.alpMin + '"></div><div class="field"><label for="s-tl">Treeline from (m)</label><input type="number" id="s-tl" value="' + bands.tlMin + '"></div><div class="field"><span class="lbl">&nbsp;</span><button class="btn" id="sBands">Save</button></div></div>' + (state.bandOverrides[a.id] ? '<button class="btn small ghost" id="sBandsReset">Reset to default</button>' : '') + '</div>';
   h += '<button class="btn" id="sHelp">How to use this app</button>';
+  h += '<div class="stack"><p class="eyebrow">App version</p><p style="margin:0">You have <b>' + APP_VERSION + '</b>.</p><button class="btn" id="sUpdate">Check for updates</button><p class="small muted" style="margin:0">Updating never deletes your pins, routes or tracks.</p></div>';
   h += '<div class="stack"><p class="eyebrow">About · version ' + APP_VERSION + '</p><p class="small muted" style="margin:0">Topo and elevation: Geospatial Information Authority of Japan (GSI). Onsens, parking and other places: © OpenStreetMap contributors. Avalanche bulletins and incident records: Japan Avalanche Network (nadare.jp), summarised. This app helps you plan. It does not replace avalanche training, a beacon, shovel and probe, or your own judgement on the day.</p></div>';
   openSheet('Settings', h, { view: 'settings', tall: true });
   $('#s-name').onchange = e => store.set('reporterName', e.target.value.trim());
@@ -1430,6 +1431,7 @@ function showSettings() {
   $('#sLink').onclick = () => window.powderShare && powderShare.picker();
   $('#sPaste').onclick = () => { const v = $('#s-paste').value.trim(); if (window.powderShare) powderShare.openText(v); };
   $('#sHelp').onclick = showHelp;
+  $('#sUpdate').onclick = async () => { if (await checkForUpdate(true)) doUpdate(); };
   $('#sImport').onclick = () => $('#importFile').click();
   wireChips();
   $('#winSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; state.recentWindow = b.dataset.v; store.set('recentWindow', state.recentWindow); $('#winSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); renderPins(); toast('Recent avalanches: ' + WINDOW_LABEL[state.recentWindow], 1400); });
@@ -1504,6 +1506,33 @@ function addHoverTitles(root) {
 }
 addHoverTitles(document);
 new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) { addHoverTitles(n); if (n.matches && n.matches('button[aria-label]:not([title])')) n.title = n.getAttribute('aria-label'); } }))).observe(document.body, { childList: true, subtree: true });
+
+/* ------------------------------------------------------------------ updates
+   Checks for a newer version (on open, when you come back to the app, every 30 min) and shows an Update button.
+   Updating only reloads the app's own files; your pins, routes, tracks and settings stay on the phone,
+   and they're backed up first if you have signal. */
+const updater = { latest: null };
+async function latestVersion() {
+  try { const t = await fetch('app.js?check=' + Date.now(), { cache: 'no-store' }).then(r => r.text()); const m = t.match(/APP_VERSION = '([^']+)'/); return m ? m[1] : null; } catch (e) { return null; }
+}
+async function checkForUpdate(manual) {
+  if (!navigator.onLine) { if (manual) toast('No signal. Check again when you have signal or Wi-Fi.'); return false; }
+  const v = await latestVersion(); updater.latest = v;
+  const newer = !!v && v !== APP_VERSION && v > APP_VERSION;
+  $('#updateBtn').hidden = !newer;
+  if (manual) toast(newer ? 'Version ' + v + ' is ready. Tap Update.' : 'You have the latest version (' + APP_VERSION + ')');
+  return newer;
+}
+async function doUpdate() {
+  const b = $('#updateBtn'); b.disabled = true; b.textContent = 'Updating…';
+  try { if (window.powderSync) await Promise.race([powderSync.sync(), new Promise(r => setTimeout(r, 4000))]); } catch (e) { }
+  try { const reg = await navigator.serviceWorker.getRegistration(); if (reg) await Promise.race([reg.update(), new Promise(r => setTimeout(r, 4000))]); } catch (e) { }
+  location.reload();
+}
+$('#updateBtn').addEventListener('click', doUpdate);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(false); });
+setInterval(() => { if (!document.hidden) checkForUpdate(false); }, 30 * 60 * 1000);
+setTimeout(() => checkForUpdate(false), 5000);
 
 async function boot() {
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { }
