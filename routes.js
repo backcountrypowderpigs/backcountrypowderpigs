@@ -451,6 +451,7 @@
       '<div class="legend small"><span><span class="sw" style="background:repeating-linear-gradient(90deg,' + PLAN_COL + ' 0 8px,transparent 8px 12px);border:0"></span>Planned route</span><span><span class="sw" style="background:' + TRACK_COL + ';border:0"></span>Recorded track</span></div>';
     h += '<div class="stack"><p class="eyebrow">Planned routes</p>' + (plans.length ? '<div class="list">' + plans.map(item).join('') + '</div>' : '<p class="small muted" style="margin:0">None yet. Plan one, or import a GPX file.</p>') + '</div>';
     h += '<div class="stack"><p class="eyebrow">Recorded tracks</p>' + (tracks.length ? '<div class="list">' + tracks.map(item).join('') + '</div>' : '<p class="small muted" style="margin:0">None yet.</p>') + '</div>';
+    if (plans.length || tracks.length || state.pins.length) h += '<button class="btn" id="shareMany">Send routes and markers to a mate…</button>';
     h += '<button class="btn" id="gpxImport">Import GPX (from a mate, CalTopo, Gaia…)</button><input type="file" id="gpxFile" accept=".gpx,application/gpx+xml,application/xml,text/xml" hidden>';
     openSheet('Routes and tracks', h, { view: 'routes', tall: true });
     $('#goPlan').onclick = () => startPlan();
@@ -458,6 +459,7 @@
     $('#sheetBody').querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', e => { if (e.target.closest('.vis')) return; openRoute(el.dataset.open); }));
     $('#sheetBody').querySelectorAll('[data-vis]').forEach(cb => cb.onchange = () => { cb.checked ? visible.add(cb.dataset.vis) : visible.delete(cb.dataset.vis); save(); drawSaved(); });
     $('#gpxImport').onclick = () => $('#gpxFile').click();
+    const sm = $('#shareMany'); if (sm) sm.onclick = () => window.powderShare && powderShare.picker();
     $('#gpxFile').onchange = async e => { const f = e.target.files[0]; if (f) await importGpx(f); e.target.value = ''; };
   }
   function openRoute(id, fresh) {
@@ -473,13 +475,14 @@
     h += '<div class="field"><label for="rName">Name</label><input type="text" id="rName" maxlength="60" value="' + esc(r.name) + '"></div>';
     h += statsHtml(r) + profileSvg(r.stats.profile, r.type === 'plan' ? r.stats.segs : null);
     h += '<div class="btn-row">' + (r.pending ? '<button class="btn primary" id="rKeep">Keep</button><button class="btn" id="rDiscard">Discard</button>'
-      : '<button class="btn" id="rShare">Share GPX</button>' + (r.type === 'plan' ? '<button class="btn" id="rEdit">Edit line</button>' : '') + '<button class="btn" id="rDel">Delete</button>') + '</div>';
+      : '<button class="btn primary" id="rLink">Send to a mate</button><button class="btn" id="rShare">GPX file</button>' + (r.type === 'plan' ? '<button class="btn" id="rEdit">Edit line</button>' : '') + '<button class="btn" id="rDel">Delete</button>') + '</div>';
     if (r.pending) h += '<button class="btn small ghost" id="rShare">Share GPX</button>';
     openSheet(r.type === 'plan' ? 'Planned route' : 'Recorded track', h, { view: 'route' });
     const nameEl = $('#rName'); nameEl.onchange = () => { r.name = nameEl.value.trim() || r.name; save(); };
     const keep = $('#rKeep'); if (keep) keep.onclick = () => { r.name = nameEl.value.trim() || r.name; delete r.pending; save(); toast('Track kept'); openRoutes(); };
     const disc = $('#rDiscard'); if (disc) disc.onclick = () => { removeRoute(r.id); toast('Track discarded'); closeSheet(); };
     const sh = $('#rShare'); if (sh) sh.onclick = () => shareGpx(r);
+    const lk = $('#rLink'); if (lk) lk.onclick = () => window.powderShare && powderShare.send({ routes: [r] }, r.name);
     const ed = $('#rEdit'); if (ed) ed.onclick = () => startPlan(r);
     const del = $('#rDel'); if (del) del.onclick = () => {
       if (!del.dataset.armed) { del.dataset.armed = '1'; del.textContent = 'Tap again to delete'; del.classList.add('danger'); return; }
@@ -538,5 +541,18 @@
   // Pick up a recording that was running when the app was closed.
   if (rec) { document.body.classList.add('recording'); $('#recBtn').classList.add('rec-on'); rec.paused = true; renderRec(); toast('Unfinished track found. Tap Resume to carry on, or Stop to save it.', 4000); }
   drawSaved();
-  window.powderRoutes = { openRoutes, startPlan, startRec };
+  // A route or track a mate shared by link. Same id already here = skip.
+  async function addShared(x) {
+    if (!x || !Array.isArray(x.pts) || x.pts.length < 2) return false;
+    if (routes.some(r => r.id === x.id)) { visible.add(x.id); save(); drawSaved(); return false; }
+    const type = x.type === 'track' ? 'track' : 'plan';
+    const pts = x.pts.slice(0, 20000).filter(p => isFinite(p[0]) && isFinite(p[1]));
+    const r = { id: String(x.id || 'r-' + uid()).slice(0, 40), type, name: String(x.name || (type === 'plan' ? 'Shared route' : 'Shared track')).slice(0, 60),
+      created: x.created || new Date().toISOString(), from: String(x.from || '').slice(0, 40), pts: type === 'plan' ? pts.map(p => [p[0], p[1]]) : pts };
+    r.stats = type === 'plan' ? lean(await analyseLine(r.pts)) : trackStats(r.pts);
+    if (type === 'track' && Array.isArray(x.sentStats)) ['dist', 'gain', 'loss', 'time', 'moving'].forEach((k, i) => { const v = Number(x.sentStats[i]); if (isFinite(v) && v >= 0) r.stats[k] = v; });
+    routes.unshift(r); visible.add(r.id); save(); drawSaved();
+    return true;
+  }
+  window.powderRoutes = { openRoutes, startPlan, startRec, openRoute, addShared, all: () => routes, fmtKm };
 })();

@@ -2,7 +2,7 @@
    Topo + elevation: GSI (国土地理院) tiles. Bulletins: JAN, summarised daily into data/bulletins.json.
    Pins live on this phone (localStorage) and move between phones with Export / Import. */
 'use strict';
-const APP_VERSION = '2026-10-15.21';
+const APP_VERSION = '2026-10-15.22';
 
 /* ------------------------------------------------------------------ constants */
 const GSI = {
@@ -1293,13 +1293,15 @@ function openPin(id) {
       h += '<div class="card"><b>Have you seen this one?</b><span class="small muted">' + (mine ? 'You ' + (mine.v === 'confirm' ? 'confirmed' : 'disputed') + ' this. You can change your answer.' : 'Confirm only what you saw yourself. Three confirmations makes a pin Trusted.') + '</span>' +
         '<div class="btn-row"><button class="btn primary" id="vYes">It\'s accurate</button><button class="btn" id="vNo">Something\'s wrong</button></div><div id="vMore" hidden></div></div>';
     } else {
-      h += '<p class="small muted" style="margin:0">You made this pin. Other riders verify it once you share it (Settings → Share my pins).</p><div class="btn-row"><button class="btn" id="pEdit">Edit</button><button class="btn" id="pMove">Move</button><button class="btn" id="pDel">Delete</button></div>';
+      h += '<p class="small muted" style="margin:0">You made this pin. Other riders can verify it once you send it to them.</p><div class="btn-row"><button class="btn" id="pEdit">Edit</button><button class="btn" id="pMove">Move</button><button class="btn" id="pDel">Delete</button></div>';
     }
   }
+  if (p.source === 'user') h += '<button class="btn" id="pSend">Send this to a mate</button>';
   h += '<a class="small" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=' + p.lat.toFixed(5) + ',' + p.lon.toFixed(5) + '">' + p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) + ' ↗</a>';
   openSheet(isRecent ? 'Recent avalanche' : isHz ? 'Marker' : 'Known slide path', h, { view: 'pin' });
   map.panTo([p.lat, p.lon]);
 
+  const sd = $('#pSend'); if (sd) sd.onclick = () => window.powderShare && powderShare.send({ pins: [p] }, isHz ? hazardOf(p.htype).label + ' marker' : isRecent ? 'Avalanche report' : 'Slide path');
   const up = $('#unplace'); if (up) up.onclick = () => { delete state.placed[p.id]; store.set('placed', state.placed); renderPins(); closeSheet(); };
   const ed = $('#pEdit'); if (ed) ed.onclick = () => pinForm(p.kind, p.lat, p.lon, state.pins.find(x => x.id === p.id));
   const mv = $('#pMove'); if (mv) mv.onclick = () => { map.setView([p.lat, p.lon]); startPlacing({ movePin: p.id }); };
@@ -1359,19 +1361,24 @@ function cleanPin(x) {
   if (!out.area) { const a = areaFor(lat, lon); out.area = a ? a.id : ''; }
   return out;
 }
-async function importPins(file) {
-  let data; try { data = JSON.parse(await file.text()); } catch (e) { toast('That file isn\'t a pins file'); return; }
-  if (!data || !['powder-pigs', 'nadare-watch'].includes(data.app) || !Array.isArray(data.pins)) { toast('That file isn\'t a Powder Pigs pins file'); return; }
+// Add pins from a mate (file or share link). Never duplicates: same pin id = merge verifications and the owner's newer edits.
+function mergePins(list) {
   let added = 0, updated = 0;
-  data.pins.slice(0, 5000).forEach(raw => {
+  (Array.isArray(list) ? list : []).slice(0, 5000).forEach(raw => {
     const x = cleanPin(raw); if (!x) return;
     const cur = state.pins.find(p => p.id === x.id);
     if (!cur) { state.pins.push(x); added++; return; }
-    // Merge: keep everyone's verifications (newest per person); take the owner's newer edit of the details.
     Object.entries(x.verifications).forEach(([d, v]) => { const mine = cur.verifications[d]; if (!mine || (v.at || '') > (mine.at || '')) cur.verifications[d] = v; });
     if (x.deviceId === cur.deviceId && (x.updatedAt || '') > (cur.updatedAt || '')) { const keep = cur.verifications; Object.assign(cur, x, { verifications: keep }); }
     updated++;
   });
+  if (added || updated) { savePins(); renderPins(); }
+  return { added, updated };
+}
+async function importPins(file) {
+  let data; try { data = JSON.parse(await file.text()); } catch (e) { toast('That file isn\'t a pins file'); return; }
+  if (!data || !['powder-pigs', 'nadare-watch'].includes(data.app) || !Array.isArray(data.pins)) { toast('That file isn\'t a Powder Pigs pins file'); return; }
+  const { added, updated } = mergePins(data.pins);
   // Areas mates have drawn
   let newAreas = 0;
   (Array.isArray(data.areas) ? data.areas : []).slice(0, 50).forEach(x => {
@@ -1395,7 +1402,10 @@ $('#importFile').addEventListener('change', e => { const f = e.target.files[0]; 
 function showSettings() {
   const a = state.area, bands = bandsFor(a);
   let h = '<div class="field"><label for="s-name">Your name on pins</label><input type="text" id="s-name" maxlength="40" value="' + esc(reporterName()) + '"></div>';
-  h += '<div class="stack"><p class="eyebrow">Share pins with your crew</p><p class="small muted" style="margin:0">Pins live on this phone. Send your file to mates; when they import it they see your pins and can confirm or dispute them. Their file back to you brings their checks and pins. Re-sharing merges, it never duplicates.</p><div class="btn-row"><button class="btn primary" id="sExport">Share my pins (' + state.pins.length + ')</button><button class="btn" id="sImport">Import pins</button></div></div>';
+  h += '<div class="stack"><p class="eyebrow">Share with your crew</p><p class="small muted" style="margin:0">Your pins and routes live on this phone. Send a link by text, LINE, WhatsApp or email; your mate taps it and adds what you sent. They can then confirm or dispute your pins and send theirs back.</p>' +
+    '<button class="btn primary" id="sLink">Send routes and markers to a mate…</button>' +
+    '<div class="field"><label for="s-paste">Got a link? Paste it here</label><input type="text" id="s-paste" autocomplete="off" spellcheck="false" placeholder="https://backcountrypowderpigs.github.io/…#s=…"></div><button class="btn" id="sPaste">Open link</button>' +
+    '<details class="small"><summary>Share as a file instead</summary><div class="btn-row" style="margin-top:8px"><button class="btn" id="sExport">Share all my pins as a file (' + state.pins.length + ')</button><button class="btn" id="sImport">Import pins file</button></div></details></div>';
   h += '<div class="stack"><p class="eyebrow">Latest satellite (Sentinel-2)</p><p class="small muted" style="margin:0">Free from the EU Copernicus programme. New passes every few days; the app picks the newest clear one. One-off setup, about 5 minutes:</p>' +
     '<ol class="small" style="margin:0;padding-left:20px;display:grid;gap:4px"><li>Make a free account at <a href="https://dataspace.copernicus.eu/" target="_blank" rel="noopener">dataspace.copernicus.eu</a>.</li><li>Open the Sentinel Hub dashboard from your account, then <b>Configuration Utility</b>.</li><li>Copy the ID of the <b>Simple WMS</b> instance (or create one from the Simple WMS template).</li><li>Paste it here.</li></ol>' +
     '<div class="field"><label for="s-sat">Copernicus instance ID</label><input type="text" id="s-sat" autocomplete="off" spellcheck="false" value="' + esc(satId()) + '" placeholder="e.g. 1a2b3c4d-…"></div><button class="btn" id="sSat">Save and show satellite</button></div>';
@@ -1413,6 +1423,8 @@ function showSettings() {
     state.base = 'sat'; store.set('base', 'sat'); closeSheet(); Promise.resolve(setBase()).then(() => toast(sat.err || 'Satellite on'));
   };
   $('#sExport').onclick = exportPins;
+  $('#sLink').onclick = () => window.powderShare && powderShare.picker();
+  $('#sPaste').onclick = () => { const v = $('#s-paste').value.trim(); if (window.powderShare) powderShare.openText(v); };
   $('#sHelp').onclick = showHelp;
   $('#sImport').onclick = () => $('#importFile').click();
   wireChips();

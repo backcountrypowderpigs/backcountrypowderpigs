@@ -3,8 +3,8 @@
    - Map + elevation tiles: served from whichever area pack holds them; never cached on the fly,
      so storage only grows when you choose to download an area.
    - Bulletin: network first, last saved copy when offline. */
-const SHELL = 'shell-v24';
-const SHELL_FILES = ['./', 'index.html', 'app.js', 'routes.js', 'style.css', 'manifest.webmanifest',
+const SHELL = 'shell-v25';
+const SHELL_FILES = ['./', 'index.html', 'app.js', 'routes.js', 'share.js', 'style.css', 'manifest.webmanifest',
   'vendor/leaflet.js', 'vendor/leaflet.css', 'icons/icon-192.png', 'icons/icon-512.png',
   'data/areas.json', 'data/known-slides.json', 'data/natural-onsens.json', 'data/bulletins.json'];
 
